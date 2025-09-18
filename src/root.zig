@@ -11,6 +11,7 @@ body: Elem,
 meta: VoidElem,
 
 script: Elem,
+style: Elem,
 noscript: Elem,
 link: VoidElem,
 
@@ -50,6 +51,14 @@ label: Elem,
 select: Elem,
 option: Elem,
 
+h1: Elem,
+h2: Elem,
+h3: Elem,
+h4: Elem,
+h5: Elem,
+h6: Elem,
+h7: Elem,
+
 table: Elem,
 thead: Elem,
 tbody: Elem,
@@ -73,6 +82,8 @@ comment: CommentElem,
 pub fn init(w: *std.Io.Writer) @This() {
     return .{
         .w = w,
+        .stack = stack_arg,
+
         .html = .{ .w = w, .tag = "html" },
         .head = .{ .w = w, .tag = "head" },
         .title = .{ .w = w, .tag = "title" },
@@ -80,6 +91,7 @@ pub fn init(w: *std.Io.Writer) @This() {
         .meta = .{ .w = w, .tag = "meta" },
 
         .script = .{ .w = w, .tag = "script" },
+        .style = .{ .w = w, .tag = "style" },
         .noscript = .{ .w = w, .tag = "noscript" },
         .link = .{ .w = w, .tag = "link" },
 
@@ -118,6 +130,14 @@ pub fn init(w: *std.Io.Writer) @This() {
         .label = .{ .w = w, .tag = "label" },
         .select = .{ .w = w, .tag = "select" },
         .option = .{ .w = w, .tag = "option" },
+
+        .h1 = .{ .w = w, .tag = "h1" },
+        .h2 = .{ .w = w, .tag = "h2" },
+        .h3 = .{ .w = w, .tag = "h3" },
+        .h4 = .{ .w = w, .tag = "h4" },
+        .h5 = .{ .w = w, .tag = "h5" },
+        .h6 = .{ .w = w, .tag = "h6" },
+        .h7 = .{ .w = w, .tag = "h7" },
 
         .table = .{ .w = w, .tag = "table" },
         .thead = .{ .w = w, .tag = "thead" },

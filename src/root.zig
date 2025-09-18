@@ -68,7 +68,7 @@ embed: VoidElem,
 track: VoidElem,
 source: VoidElem,
 
-//comment: CommentElem,
+comment: CommentElem,
 
 pub fn init(w: *std.Io.Writer) @This() {
     return .{
@@ -137,15 +137,7 @@ pub fn init(w: *std.Io.Writer) @This() {
         .track = .{ .w = w, .tag = "track" },
         .source = .{ .w = w, .tag = "source" },
 
-        //.comment = .{
-        //    .w = w,
-        //},
-        // TODO:
-        // comment.@"<!--"();
-        // comment.@"-->"();
-        // comment.begin();
-        // comment.end();
-        // comment.render(str);
+        .comment = .{ .w = w },
     };
 }
 
@@ -231,6 +223,38 @@ const Elem = struct {
     }
 };
 
+const CommentElem = struct {
+    w: *std.Io.Writer,
+
+    pub fn begin(self: @This()) !void {
+        try self.w.writeAll("<!-- ");
+    }
+
+    pub fn end(self: @This()) !void {
+        try self.w.writeAll(" -->");
+    }
+
+    pub fn render(self: @This(), str: []const u8) !void {
+        try self.begin();
+        try writeEscapedContent(self.w, str);
+        try self.end();
+    }
+
+    pub fn @"renderUnsafe!?"(self: @This(), str: []const u8) !void {
+        try self.begin();
+        try self.w.writeAll(str);
+        try self.end();
+    }
+
+    pub inline fn write(self: @This(), str: []const u8) !void {
+        return writeEscapedContent(self.w, str);
+    }
+
+    pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
+        return self.w.writeAll(str);
+    }
+};
+
 const VoidElem = struct {
     w: *std.Io.Writer,
     tag: []const u8,
@@ -249,107 +273,12 @@ const VoidElem = struct {
     }
 };
 
-//pub fn div(self: @This()) !void {
-//    try self.elem("div");
-//}
-//pub fn @"div[]"(self: @This(), args: anytype) !void {
-//    try self.@"elem[]"("div", args);
-//}
-//pub fn @"div[]="(self: @This(), args: anytype, content: []const u8) !void {
-//    try self.@"elem[]="("div", args, content);
-//}
-//pub fn @"div="(self: @This(), content: []const u8) !void {
-//    try self.@"elem="("div", content);
-//}
-//pub fn @"/div"(self: @This()) !void {
-//    try self.@"/elem"("div");
-//}
-//
-//pub fn p(self: @This()) !void {
-//    try self.elem("p");
-//}
-//pub fn @"p[]"(self: @This(), args: anytype) !void {
-//    try self.@"elem[]"("p", args);
-//}
-//pub fn @"p[]="(self: @This(), args: anytype, content: []const u8) !void {
-//    try self.@"elem[]="("p", args, content);
-//}
-//pub fn @"p="(self: @This(), content: []const u8) !void {
-//    try self.@"elem="("p", content);
-//}
-//pub fn @"/p"(self: @This()) !void {
-//    try self.@"/elem"("p");
-//}
-//
-//pub fn a(self: @This()) !void {
-//    try self.elem("a");
-//}
-//pub fn @"a[]"(self: @This(), args: anytype) !void {
-//    try self.@"elem[]"("a", args);
-//}
-//pub fn @"a[]="(self: @This(), args: anytype, content: []const u8) !void {
-//    try self.@"elem[]="("a", args, content);
-//}
-//pub fn @"a="(self: @This(), content: []const u8) !void {
-//    try self.@"elem="("a", content);
-//}
-//pub fn @"/a"(self: @This()) !void {
-//    try self.@"/elem"("a");
-//}
-//
-//pub fn elem(self: @This(), name: []const u8) !void {
-//    try self.w.writeAll("</");
-//    try self.w.writeAll(name);
-//    try self.w.writeAll(">");
-//}
-//pub fn @"elem[]"(self: @This(), name: []const u8, args: anytype) !void {
-//    try self.w.writeAll("<");
-//    try self.w.writeAll(name);
-//    try writeAttributes(self.w, args);
-//    try self.w.writeAll(">");
-//}
-//
-//pub fn @"/elem"(self: @This(), name: []const u8) !void {
-//    try self.w.writeAll("</");
-//    try self.w.writeAll(name);
-//    try self.w.writeAll(">");
-//}
-//
-//pub fn @"elem[]="(self: @This(), name: []const u8, args: anytype, content: []const u8) !void {
-//    try self.@"elem[]"(name, args);
-//    try self.w.writeAll(content);
-//    try self.@"/elem"(name);
-//}
-//
-//pub fn @"elem="(self: @This(), name: []const u8, content: []const u8) !void {
-//    try self.elem(name);
-//    try self.w.writeAll(content);
-//    try self.@"/elem"(name);
-//}
-
 fn writeAttributes(w: *std.Io.Writer, args: anytype) !void {
     inline for (std.meta.fields(@TypeOf(args))) |field| {
         try w.print(" {s}=", .{field.name});
         try writeEscapedAttr(w, @field(args, field.name));
     }
 }
-
-//fn writeEscaped(w: *std.Io.Writer, str: []const u8, charsToEscape: []const u8) !void {
-//    //for (charsToEscape) |ch| exclude.set(ch);
-//
-//    try w.writeByte('"');
-//    var i: usize = 0;
-//    while (i < str.len) : (i += 1) {
-//        const j = std.mem.indexOfScalarPos(u8, str, i, '"') orelse break;
-//        try w.writeAll(str[i..j]);
-//        try w.writeAll(
-//            \\\"
-//        );
-//        i = j;
-//    }
-//    try w.writeAll(str[i..]);
-//    try w.writeByte('"');
-//}
 
 fn writeEscapedContent(w: *std.Io.Writer, str: []const u8) !void {
     for (str) |ch| {
@@ -374,21 +303,6 @@ fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) !void {
     try w.writeByte('"');
 }
 
-fn writeQuoted(w: *std.Io.Writer, str: []const u8) !void {
-    try w.writeByte('"');
-    var i: usize = 0;
-    while (i < str.len) : (i += 1) {
-        const j = std.mem.indexOfScalarPos(u8, str, i, '"') orelse break;
-        try w.writeAll(str[i..j]);
-        try w.writeAll(
-            \\\"
-        );
-        i = j;
-    }
-    try w.writeAll(str[i..]);
-    try w.writeByte('"');
-}
-
 test {
     var stderr = std.fs.File.stderr().writer(&.{});
     const w = &stderr.interface;
@@ -408,6 +322,10 @@ test {
 
     try img.render_(.{ .src = "blah" });
 
+    try h.write("\n");
+
+    try h.comment.begin();
+    try h.comment.end();
     try h.write("\n");
 
     try div.@"<=>"(.{ .id = "foo", .class = "blah" });

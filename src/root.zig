@@ -1,8 +1,14 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Self = @This();
 
+const Error = error{
+    ClosingTagMismatch,
+};
+
 w: *std.Io.Writer,
+stack: ?*TagStack,
 
 html: Elem,
 head: Elem,
@@ -80,7 +86,19 @@ source: VoidElem,
 comment: CommentElem,
 
 pub fn init(w: *std.Io.Writer) @This() {
-    return .{
+    return initWithStack(w, null);
+}
+
+pub fn initDebug(w: *std.Io.Writer, allocator: std.mem.Allocator) @This() {
+    const stack = allocator.create(TagStack) catch {
+        @panic("failed to allocate memory for the stack");
+    };
+    stack.* = .{ .allocator = allocator };
+    return initWithStack(w, stack);
+}
+
+fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
+    var self: @This() = .{
         .w = w,
         .stack = stack_arg,
 
@@ -159,6 +177,33 @@ pub fn init(w: *std.Io.Writer) @This() {
 
         .comment = .{ .w = w },
     };
+
+    if (stack_arg) |stack| {
+        inline for (std.meta.fields(Self)) |field| {
+            // initialize the stack field for each elem,
+            // this is equivalent to doing manually:
+            //   self.html.stack  = stack;
+            //   self.head.stack  = stack;
+            //   self.title.stack = stack;
+            // ... and so on
+            const f: std.builtin.Type.StructField = field;
+            switch (f.type) {
+                Elem, CommentElem => {
+                    @field(self, f.name).stack = stack;
+                },
+                else => {},
+            }
+        }
+    }
+
+    return self;
+}
+
+pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+    if (self.stack) |stack| {
+        stack.items.deinit(allocator);
+        allocator.destroy(stack);
+    }
 }
 
 pub inline fn write(self: @This(), str: []const u8) !void {
@@ -169,16 +214,26 @@ pub inline fn writeUnsafe(self: @This(), str: []const u8) !void {
     return self.w.writeAll(str);
 }
 
-const Elem = struct {
+pub const Elem = struct {
     w: *std.Io.Writer,
+    stack: ?*TagStack = null,
     tag: []const u8,
 
     pub fn begin(self: @This()) !void {
-        try self.w.writeAll("</");
+        if (builtin.mode == .Debug) if (self.stack) |stack| {
+            stack.push(self.tag);
+        };
+
+        try self.w.writeAll("<");
         try self.w.writeAll(self.tag);
         try self.w.writeAll(">");
     }
+
     pub fn begin_(self: @This(), args: anytype) !void {
+        if (builtin.mode == .Debug) if (self.stack) |stack| {
+            stack.push(self.tag);
+        };
+
         try self.w.writeAll("<");
         try self.w.writeAll(self.tag);
         try writeAttributes(self.w, args);
@@ -186,28 +241,25 @@ const Elem = struct {
     }
 
     pub fn end(self: @This()) !void {
+        if (builtin.mode == .Debug) if (self.stack) |stack| {
+            try stack.checkMatching(self.tag);
+        };
+
         try self.w.writeAll("</");
         try self.w.writeAll(self.tag);
         try self.w.writeAll(">");
     }
 
-    pub fn @"<>"(self: @This()) !void {
-        try self.w.writeAll("</");
-        try self.w.writeAll(self.tag);
-        try self.w.writeAll(">");
+    pub inline fn @"<>"(self: @This()) !void {
+        return self.begin();
     }
 
     pub fn @"<=>"(self: @This(), args: anytype) !void {
-        try self.w.writeAll("<");
-        try self.w.writeAll(self.tag);
-        try writeAttributes(self.w, args);
-        try self.w.writeAll(">");
+        return self.begin_(args);
     }
 
     pub fn @"</>"(self: @This()) !void {
-        try self.w.writeAll("</");
-        try self.w.writeAll(self.tag);
-        try self.w.writeAll(">");
+        return self.end();
     }
 
     pub fn render_(self: @This(), args: anytype, str: []const u8) !void {
@@ -222,13 +274,13 @@ const Elem = struct {
         try self.end();
     }
 
-    pub fn renderUnsafe_(self: @This(), args: anytype, str: []const u8) !void {
+    pub fn @"renderUnsafe_!?"(self: @This(), args: anytype, str: []const u8) !void {
         try self.begin_(args);
         try self.w.writeAll(str);
         try self.end();
     }
 
-    pub fn renderUnsafe(self: @This(), str: []const u8) !void {
+    pub fn @"renderUnsafe!?"(self: @This(), str: []const u8) !void {
         try self.begin();
         try self.w.writeAll(str);
         try self.end();
@@ -238,19 +290,27 @@ const Elem = struct {
         return writeEscapedContent(self.w, str);
     }
 
-    pub inline fn writeUnsafe(self: @This(), str: []const u8) !void {
+    pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
         return self.w.writeAll(str);
     }
 };
 
 const CommentElem = struct {
     w: *std.Io.Writer,
+    stack: ?*TagStack = null,
 
     pub fn begin(self: @This()) !void {
+        if (builtin.mode == .Debug) if (self.stack) |stack| {
+            stack.push("!----");
+        };
         try self.w.writeAll("<!-- ");
     }
 
     pub fn end(self: @This()) !void {
+        if (builtin.mode == .Debug) if (self.stack) |stack| {
+            try stack.checkMatching("!----");
+        };
+
         try self.w.writeAll(" -->");
     }
 
@@ -293,6 +353,35 @@ const VoidElem = struct {
     }
 };
 
+const TagStack = struct {
+    allocator: std.mem.Allocator,
+    items: std.ArrayList([]const u8) = .empty,
+    index: u8 = 0,
+
+    pub fn push(self: *@This(), item: []const u8) void {
+        self.items.append(self.allocator, item) catch {
+            if (builtin.mode == .Debug) {
+                @panic("failed to allocator memory");
+            }
+        };
+    }
+
+    pub fn pop(self: *@This()) ?[]const u8 {
+        return self.items.pop();
+    }
+
+    pub fn checkMatching(self: *@This(), expected: []const u8) !void {
+        const tag = self.pop();
+        if (tag == null or !std.mem.eql(u8, tag.?, expected)) {
+            std.debug.print(
+                "\ncan't close tag <{s}> : <{s}> is still open\n",
+                .{ expected, if (tag) |s| s else "null" },
+            );
+            return Error.ClosingTagMismatch;
+        }
+    }
+};
+
 fn writeAttributes(w: *std.Io.Writer, args: anytype) !void {
     inline for (std.meta.fields(@TypeOf(args))) |field| {
         try w.print(" {s}=", .{field.name});
@@ -324,36 +413,40 @@ fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) !void {
 }
 
 test {
+    const allocator = std.testing.allocator;
     var stderr = std.fs.File.stderr().writer(&.{});
     const w = &stderr.interface;
-    const h: Self = .init(w);
+
+    const z: Self = .initDebug(w, allocator);
+    defer z.deinit(allocator);
+
     const div, const span, const img = .{
-        h.div,
-        h.span,
-        h.img,
+        z.div,
+        z.span,
+        z.img,
     };
 
     try span.@"<>"();
     try span.write("asdfafds");
     try span.@"</>"();
-    try h.write("\n");
+    try z.write("\n");
     try span.render("inside span");
-    try h.write("\n");
+    try z.write("\n");
 
     try img.render_(.{ .src = "blah" });
 
-    try h.write("\n");
+    try z.write("\n");
 
-    try h.comment.begin();
-    try h.comment.end();
-    try h.write("\n");
+    try z.comment.begin();
+    try z.comment.end();
+    try z.write("\n");
 
     try div.@"<=>"(.{ .id = "foo", .class = "blah" });
     {
         try span.render("<asdf");
-        try span.renderUnsafe("<asdf");
-        try h.write("<test>");
-        try h.writeUnsafe("<test>");
+        try span.@"renderUnsafe!?"("<asdf");
+        try z.write("<test>");
+        try z.writeUnsafe("<test>");
         //try component1.write();
         //try component2.start();
         {
@@ -363,4 +456,74 @@ test {
     }
 
     try div.@"</>"();
+    try z.write("\n");
+}
+
+test "matching mismatch closing tag" {
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Discarding = .init(&.{});
+    const w = &buf.writer;
+
+    const z: Self = .initDebug(w, allocator);
+    defer z.deinit(allocator);
+
+    try z.div.begin();
+    const err = z.span.end();
+
+    try std.testing.expectError(Error.ClosingTagMismatch, err);
+}
+
+test {
+    const expected =
+        \\<html><head><title>page title</title><meta charset="utf-8"><style>
+        \\body { background: red }
+        \\h1 { color: blue }</style></head><body><h1>heading</h1><h1 id="test">heading with id test</h1><p>This is a sentence 1.
+        \\ This is a sentence 2.</p></body></html>
+    ;
+
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const w = &buf.writer;
+    const z: Self = .initDebug(w, allocator);
+    defer z.deinit(allocator);
+
+    try z.html.begin();
+    {
+        try z.head.begin();
+        {
+            try z.title.render("page title");
+            try z.meta.render_(.{
+                .charset = "utf-8",
+            });
+            try z.style.begin();
+            {
+                try z.style.@"writeUnsafe!?"(
+                    \\
+                    \\body { background: red }
+                    \\h1 { color: blue }
+                );
+            }
+            try z.style.end();
+        }
+        try z.head.end();
+
+        try z.body.begin();
+        {
+            try z.h1.render("heading");
+            try z.h1.render_(.{ .id = "test" }, "heading with id test");
+            try z.p.render(
+                \\This is a sentence 1.
+                \\ This is a sentence 2.
+            );
+        }
+        try z.body.end();
+    }
+    try z.html.end();
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(expected, output);
 }

@@ -1,10 +1,9 @@
 
-# zzzz (name to change)
+# zhtml
 
 A simple low-abstraction HTML templating library for zig.
 
-The templating language itself will be written using 
-ordinary zig code: 
+The templating language uses ordinary zig code: 
 
 ```zig
 try h1.render_(.{ .id = "id" }, "heading");
@@ -27,14 +26,18 @@ try ul.end();
 ```
 
 Depending on one's taste, this may or may look horribly verbose,
-or criminally procedural for outputting declarative markup.
+or criminally procedural for a declarative markup.
 On the plus side, it's fairly close to the "metal",
-which is to say it has little overhead, so it shoud be quite fast.
+so it shoud be quite fast.
 
 Basically this is almost just a wrapper for the Io.Writer interface,
-but still useful enough to prevent silly HTML syntax errors
-and common XSS mistakes. It's also composable enough to allow conditionals
-and looping while building the HTML.
+but with the supposed benefits:
+- prevents silly HTML syntax errors
+- prevents common XSS mistakes
+- allows looping and conditionals
+- composable HTML components
+- low-overhead in contrast to other interpreted templating
+  languages
 
 ## Why not just use
 - **Writer.print**

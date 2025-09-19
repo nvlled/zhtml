@@ -206,7 +206,7 @@ pub const Elem = struct {
     stack: ?*TagStack = null,
     tag: []const u8,
 
-    pub fn begin(self: @This()) !void {
+    pub fn begin_(self: @This()) !void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             stack.push(self.tag);
         };
@@ -216,7 +216,7 @@ pub const Elem = struct {
         try self.w.writeAll(">");
     }
 
-    pub fn begin_(self: @This(), args: anytype) !void {
+    pub fn begin(self: @This(), args: anytype) !void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             stack.push(self.tag);
         };
@@ -238,74 +238,26 @@ pub const Elem = struct {
     }
 
     pub inline fn @"<>"(self: @This()) !void {
-        return self.begin();
+        return self.begin_();
     }
 
     pub fn @"<=>"(self: @This(), args: anytype) !void {
-        return self.begin_(args);
+        return self.begin(args);
     }
 
     pub fn @"</>"(self: @This()) !void {
         return self.end();
     }
 
-    pub fn render_(self: @This(), args: anytype, str: []const u8) !void {
-        try self.begin_(args);
+    pub fn render(self: @This(), args: anytype, str: []const u8) !void {
+        try self.begin(args);
         try writeEscapedContent(self.w, str);
         try self.end();
     }
 
-    pub fn render(self: @This(), str: []const u8) !void {
-        try self.begin();
+    pub fn render_(self: @This(), str: []const u8) !void {
+        try self.begin_();
         try writeEscapedContent(self.w, str);
-        try self.end();
-    }
-
-    pub fn @"renderUnsafe_!?"(self: @This(), args: anytype, str: []const u8) !void {
-        try self.begin_(args);
-        try self.w.writeAll(str);
-        try self.end();
-    }
-
-    pub fn @"renderUnsafe!?"(self: @This(), str: []const u8) !void {
-        try self.begin();
-        try self.w.writeAll(str);
-        try self.end();
-    }
-
-    pub inline fn write(self: @This(), str: []const u8) !void {
-        return writeEscapedContent(self.w, str);
-    }
-
-    pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
-        return self.w.writeAll(str);
-    }
-
-    pub fn renderPrint(
-        self: @This(),
-        gpa: Allocator,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) !void {
-        const str = try std.fmt.allocPrint(gpa, fmt, args);
-        defer gpa.free(str);
-
-        try self.begin();
-        try writeEscapedContent(self.w, str);
-        try self.end();
-    }
-
-    pub fn @"renderPrintUnsafe!?"(
-        self: @This(),
-        gpa: Allocator,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) !void {
-        const str = try std.fmt.allocPrint(gpa, fmt, args);
-        defer gpa.free(str);
-
-        try self.begin();
-        try self.w.writeAll(str);
         try self.end();
     }
 };
@@ -314,7 +266,7 @@ const CommentElem = struct {
     w: *std.Io.Writer,
     stack: ?*TagStack = null,
 
-    pub fn begin(self: @This()) !void {
+    pub fn begin_(self: @This()) !void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             stack.push("!----");
         };
@@ -330,23 +282,9 @@ const CommentElem = struct {
     }
 
     pub fn render(self: @This(), str: []const u8) !void {
-        try self.begin();
+        try self.begin_();
         try writeEscapedContent(self.w, str);
         try self.end();
-    }
-
-    pub fn @"renderUnsafe!?"(self: @This(), str: []const u8) !void {
-        try self.begin();
-        try self.w.writeAll(str);
-        try self.end();
-    }
-
-    pub inline fn write(self: @This(), str: []const u8) !void {
-        return writeEscapedContent(self.w, str);
-    }
-
-    pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
-        return self.w.writeAll(str);
     }
 };
 
@@ -354,21 +292,21 @@ const VoidElem = struct {
     w: *std.Io.Writer,
     tag: []const u8,
 
-    pub fn render_(self: @This(), args: anytype) !void {
+    pub fn render(self: @This(), args: anytype) !void {
         try self.w.writeAll("<");
         try self.w.writeAll(self.tag);
         try writeAttributes(self.w, args);
         try self.w.writeAll(">");
     }
 
-    pub fn render(self: @This()) !void {
+    pub fn render_(self: @This()) !void {
         try self.w.writeAll("<");
         try self.w.writeAll(self.tag);
         try self.w.writeAll(">");
     }
 };
 
-const Formatter = struct {
+pub const Formatter = struct {
     arena: std.heap.ArenaAllocator,
 
     pub fn init(gpa: Allocator) @This() {
@@ -381,7 +319,7 @@ const Formatter = struct {
         self.arena.deinit();
     }
 
-    pub fn print(self: *@This(), comptime fmt: []const u8, args: anytype) ![]const u8 {
+    pub fn string(self: *@This(), comptime fmt: []const u8, args: anytype) ![]const u8 {
         const arena = self.arena.allocator();
         return std.fmt.allocPrint(arena, fmt, args);
     }
@@ -454,7 +392,7 @@ test "matching mismatch closing tag" {
     const z: Zhtml = try .initDebug(w, allocator);
     defer z.deinit(allocator);
 
-    try z.div.begin();
+    try z.div.begin_();
     const err = z.span.end();
 
     try std.testing.expectError(Error.ClosingTagMismatch, err);
@@ -475,17 +413,17 @@ test {
     const z: Zhtml = try .initDebug(&buf.writer, allocator);
     defer z.deinit(allocator);
 
-    try z.html.begin();
+    try z.html.begin_();
     {
-        try z.head.begin();
+        try z.head.begin_();
         {
-            try z.title.render("page title");
-            try z.meta.render_(.{
+            try z.title.render_("page title");
+            try z.meta.render(.{
                 .charset = "utf-8",
             });
-            try z.style.begin();
+            try z.style.begin_();
             {
-                try z.style.@"writeUnsafe!?"(
+                try z.@"writeUnsafe!?"(
                     \\
                     \\body { background: red }
                     \\h1 { color: blue }
@@ -495,15 +433,15 @@ test {
         }
         try z.head.end();
 
-        try z.body.begin();
+        try z.body.begin_();
         {
-            try z.h1.render("heading");
+            try z.h1.render_("heading");
 
-            try z.h1.render_(.{
+            try z.h1.render(.{
                 .id = "test",
             }, "heading with id test");
 
-            try z.p.render(
+            try z.p.render_(
                 \\This is a sentence 1.
                 \\ This is a sentence 2.
             );
@@ -524,10 +462,10 @@ test {
         \\<h2>subheading</h2>
         \\<ul>
         \\  <li>item 0</li>
-        \\  <li>item 1</li>
         \\  <li>item 2</li>
-        \\  <li>item 3</li>
         \\  <li>item 4</li>
+        \\  <li>item 6</li>
+        \\  <li>item 8</li>
         \\</ul>
     ;
 
@@ -544,15 +482,18 @@ test {
     const li = z.li;
 
     {
-        try h1.render_(.{ .id = "id" }, "heading");
+        try h1.render(.{ .id = "id" }, "heading");
         try z.write("\n");
-        try h2.render("subheading");
+        try h2.render_("subheading");
         try z.write("\n");
-        try ul.begin();
+        try ul.begin_();
         try z.write("\n");
-        for (0..5) |i| {
+        for (0..10) |i| {
+            if (i % 2 != 0) continue;
             try z.write("  ");
-            try li.renderPrint(allocator, "item {d}", .{i});
+            try li.begin_();
+            try z.print(allocator, "item {d}", .{i});
+            try li.end();
             try z.write("\n");
         }
         try ul.end();
@@ -569,8 +510,6 @@ test "formatting and printing" {
         \\<div class="foo-123">
         \\<div>1 2 3</div>
         \\<div>4 5 6</div>
-        \\<div>7 8 9</div>
-        \\<div>10 11 12</div>
         \\</div>
     ;
 
@@ -586,18 +525,18 @@ test "formatting and printing" {
 
     const div = z.div;
 
-    try div.begin_(.{
-        .class = try fmt.print("foo-{d}", .{123}),
+    try div.begin(.{
+        .class = try fmt.string("foo-{d}", .{123}),
     });
     {
         try z.print(allocator, "{s}", .{"\n"});
-        try div.renderPrint(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
+
+        try div.begin_();
+        try z.print(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
+        try div.end();
+
         try z.write("\n");
-        try div.render(try fmt.print("{d} {d} {d}", .{ 4, 5, 6 }));
-        try z.write("\n");
-        try div.@"renderPrintUnsafe!?"(allocator, "{d} {d} {d}", .{ 7, 8, 9 });
-        try z.write("\n");
-        try div.@"renderUnsafe!?"(try fmt.print("{d} {d} {d}", .{ 10, 11, 12 }));
+        try div.render_(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
         try z.write("\n");
     }
     try div.end();

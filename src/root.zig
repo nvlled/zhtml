@@ -4,9 +4,9 @@ const Allocator = std.mem.Allocator;
 
 const Zhtml = @This();
 
-const Error = error{
-    ClosingTagMismatch,
-};
+const Error = error{ClosingTagMismatch};
+const AllocatorError = Allocator.Error;
+const WriterError = std.Io.Writer.Error;
 
 // all elem fields will be initialized with
 // comptime reflection, other fields should
@@ -99,7 +99,7 @@ pub fn init(w: *std.Io.Writer) !@This() {
     return initWithStack(w, null);
 }
 
-pub fn initDebug(w: *std.Io.Writer, allocator: Allocator) !@This() {
+pub fn initDebug(w: *std.Io.Writer, allocator: Allocator) AllocatorError!@This() {
     const stack = try allocator.create(TagStack);
     stack.* = .{ .allocator = allocator };
     return initWithStack(w, stack);
@@ -169,11 +169,11 @@ pub fn deinit(self: Zhtml, allocator: Allocator) void {
     }
 }
 
-pub inline fn write(self: @This(), str: []const u8) !void {
+pub inline fn write(self: @This(), str: []const u8) WriterError!void {
     return writeEscapedContent(self.internal.w, str);
 }
 
-pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
+pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) WriterError!void {
     return self.internal.w.writeAll(str);
 }
 
@@ -182,7 +182,7 @@ pub fn print(
     gpa: Allocator,
     comptime fmt: []const u8,
     args: anytype,
-) !void {
+) (WriterError || AllocatorError)!void {
     const str = try std.fmt.allocPrint(gpa, fmt, args);
     defer gpa.free(str);
 
@@ -194,7 +194,7 @@ pub fn @"printUnsafe!?"(
     gpa: Allocator,
     comptime fmt: []const u8,
     args: anytype,
-) !void {
+) (WriterError || AllocatorError)!void {
     const str = try std.fmt.allocPrint(gpa, fmt, args);
     defer gpa.free(str);
 
@@ -206,7 +206,7 @@ pub const Elem = struct {
     stack: ?*TagStack = null,
     tag: []const u8,
 
-    pub fn begin_(self: @This()) !void {
+    pub fn begin_(self: @This()) WriterError!void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             stack.push(self.tag);
         };
@@ -216,7 +216,7 @@ pub const Elem = struct {
         try self.w.writeAll(">");
     }
 
-    pub fn begin(self: @This(), args: anytype) !void {
+    pub fn begin(self: @This(), args: anytype) WriterError!void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             stack.push(self.tag);
         };
@@ -227,7 +227,7 @@ pub const Elem = struct {
         try self.w.writeAll(">");
     }
 
-    pub fn end(self: @This()) !void {
+    pub fn end(self: @This()) (Error || WriterError)!void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             try stack.checkMatching(self.tag);
         };
@@ -237,25 +237,32 @@ pub const Elem = struct {
         try self.w.writeAll(">");
     }
 
-    pub inline fn @"<>"(self: @This()) !void {
+    pub inline fn @"<>"(self: @This()) WriterError!void {
         return self.begin_();
     }
 
-    pub fn @"<=>"(self: @This(), args: anytype) !void {
+    pub fn @"<=>"(self: @This(), args: anytype) WriterError!void {
         return self.begin(args);
     }
 
-    pub fn @"</>"(self: @This()) !void {
+    pub fn @"</>"(self: @This()) (Error || WriterError)!void {
         return self.end();
     }
 
-    pub fn render(self: @This(), args: anytype, str: []const u8) !void {
+    pub fn render(
+        self: @This(),
+        args: anytype,
+        str: []const u8,
+    ) (Error || AllocatorError || WriterError)!void {
         try self.begin(args);
         try writeEscapedContent(self.w, str);
         try self.end();
     }
 
-    pub fn render_(self: @This(), str: []const u8) !void {
+    pub fn render_(
+        self: @This(),
+        str: []const u8,
+    ) (Error || AllocatorError || WriterError)!void {
         try self.begin_();
         try writeEscapedContent(self.w, str);
         try self.end();
@@ -266,14 +273,14 @@ const CommentElem = struct {
     w: *std.Io.Writer,
     stack: ?*TagStack = null,
 
-    pub fn begin_(self: @This()) !void {
+    pub fn begin_(self: @This()) WriterError!void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             stack.push("!----");
         };
         try self.w.writeAll("<!-- ");
     }
 
-    pub fn end(self: @This()) !void {
+    pub fn end(self: @This()) (Error || WriterError)!void {
         if (builtin.mode == .Debug) if (self.stack) |stack| {
             try stack.checkMatching("!----");
         };
@@ -281,7 +288,7 @@ const CommentElem = struct {
         try self.w.writeAll(" -->");
     }
 
-    pub fn render(self: @This(), str: []const u8) !void {
+    pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
         try self.begin_();
         try writeEscapedContent(self.w, str);
         try self.end();
@@ -292,14 +299,14 @@ const VoidElem = struct {
     w: *std.Io.Writer,
     tag: []const u8,
 
-    pub fn render(self: @This(), args: anytype) !void {
+    pub fn render(self: @This(), args: anytype) WriterError!void {
         try self.w.writeAll("<");
         try self.w.writeAll(self.tag);
         try writeAttributes(self.w, args);
         try self.w.writeAll(">");
     }
 
-    pub fn render_(self: @This()) !void {
+    pub fn render_(self: @This()) WriterError!void {
         try self.w.writeAll("<");
         try self.w.writeAll(self.tag);
         try self.w.writeAll(">");
@@ -319,7 +326,11 @@ pub const Formatter = struct {
         self.arena.deinit();
     }
 
-    pub fn string(self: *@This(), comptime fmt: []const u8, args: anytype) ![]const u8 {
+    pub fn string(
+        self: *@This(),
+        comptime fmt: []const u8,
+        args: anytype,
+    ) AllocatorError![]const u8 {
         const arena = self.arena.allocator();
         return std.fmt.allocPrint(arena, fmt, args);
     }
@@ -342,7 +353,7 @@ const TagStack = struct {
         return self.items.pop();
     }
 
-    pub fn checkMatching(self: *@This(), expected: []const u8) !void {
+    pub fn checkMatching(self: *@This(), expected: []const u8) Error!void {
         const tag = self.pop();
         if (tag == null or !std.mem.eql(u8, tag.?, expected)) {
             std.debug.print(
@@ -354,14 +365,14 @@ const TagStack = struct {
     }
 };
 
-inline fn writeAttributes(w: *std.Io.Writer, args: anytype) !void {
+inline fn writeAttributes(w: *std.Io.Writer, args: anytype) WriterError!void {
     inline for (std.meta.fields(@TypeOf(args))) |field| {
         try w.print(" {s}=", .{field.name});
         try writeEscapedAttr(w, @field(args, field.name));
     }
 }
 
-fn writeEscapedContent(w: *std.Io.Writer, str: []const u8) !void {
+fn writeEscapedContent(w: *std.Io.Writer, str: []const u8) WriterError!void {
     for (str) |ch| {
         switch (ch) {
             '<' => try w.writeAll("&lt;"),
@@ -372,7 +383,7 @@ fn writeEscapedContent(w: *std.Io.Writer, str: []const u8) !void {
     }
 }
 
-fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) !void {
+fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) WriterError!void {
     try w.writeByte('"');
     for (str) |ch| {
         switch (ch) {
@@ -400,7 +411,7 @@ test "matching mismatch closing tag" {
 
 test {
     const expected =
-        \\<html><head><title>page title</title><meta charset="utf-8"><style>
+        \\<html><!-- some comment here --><head><title>page title</title><meta charset="utf-8"><style>
         \\body { background: red }
         \\h1 { color: blue }</style></head><body><h1>heading</h1><h1 id="test">heading with id test</h1><p>This is a sentence 1.
         \\ This is a sentence 2.</p></body></html>
@@ -415,6 +426,7 @@ test {
 
     try z.html.begin_();
     {
+        try z.comment.render("some comment here");
         try z.head.begin_();
         {
             try z.title.render_("page title");
@@ -545,4 +557,9 @@ test "formatting and printing" {
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(expected, output);
+}
+
+test {
+    if (builtin.mode == .Debug)
+        std.testing.refAllDeclsRecursive(Zhtml);
 }

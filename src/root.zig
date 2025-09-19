@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const Allocator = std.mem.Allocator;
 
 const Self = @This();
 
@@ -7,8 +8,17 @@ const Error = error{
     ClosingTagMismatch,
 };
 
-w: *std.Io.Writer,
-stack: ?*TagStack,
+// all elem fields will be initialized with
+// comptime reflection, other fields should
+// go into the internal sub-field
+
+internal: struct {
+    // all non-elem fields must be added here
+    // so that the compiler can detect which
+    // fields are not initialized
+    w: *std.Io.Writer,
+    stack: ?*TagStack,
+},
 
 html: Elem,
 head: Elem,
@@ -85,133 +95,86 @@ source: VoidElem,
 
 comment: CommentElem,
 
-pub fn init(w: *std.Io.Writer) @This() {
+pub fn init(w: *std.Io.Writer) !@This() {
     return initWithStack(w, null);
 }
 
-pub fn initDebug(w: *std.Io.Writer, allocator: std.mem.Allocator) @This() {
-    const stack = allocator.create(TagStack) catch {
-        @panic("failed to allocate memory for the stack");
-    };
+pub fn initDebug(w: *std.Io.Writer, allocator: Allocator) !@This() {
+    const stack = try allocator.create(TagStack);
     stack.* = .{ .allocator = allocator };
     return initWithStack(w, stack);
 }
 
 fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
-    var self: @This() = .{
-        .w = w,
-        .stack = stack_arg,
+    var self: Self = undefined;
 
-        .html = .{ .w = w, .tag = "html" },
-        .head = .{ .w = w, .tag = "head" },
-        .title = .{ .w = w, .tag = "title" },
-        .body = .{ .w = w, .tag = "body" },
-        .meta = .{ .w = w, .tag = "meta" },
-
-        .script = .{ .w = w, .tag = "script" },
-        .style = .{ .w = w, .tag = "style" },
-        .noscript = .{ .w = w, .tag = "noscript" },
-        .link = .{ .w = w, .tag = "link" },
-
-        .a = .{ .w = w, .tag = "a" },
-        .base = .{ .w = w, .tag = "base" },
-
-        .p = .{ .w = w, .tag = "p" },
-        .div = .{ .w = w, .tag = "div" },
-        .span = .{ .w = w, .tag = "span" },
-
-        .details = .{ .w = w, .tag = "details" },
-        .summary = .{ .w = w, .tag = "summary" },
-
-        .b = .{ .w = w, .tag = "b" },
-        .i = .{ .w = w, .tag = "i" },
-        .em = .{ .w = w, .tag = "em" },
-        .strong = .{ .w = w, .tag = "strong" },
-        .small = .{ .w = w, .tag = "small" },
-        .s = .{ .w = w, .tag = "s" },
-        .pre = .{ .w = w, .tag = "pre" },
-        .code = .{ .w = w, .tag = "code" },
-
-        .br = .{ .w = w, .tag = "br" },
-        .hr = .{ .w = w, .tag = "hr" },
-
-        .blockQuote = .{ .w = w, .tag = "blockQuote" },
-
-        .ol = .{ .w = w, .tag = "ol" },
-        .ul = .{ .w = w, .tag = "ul" },
-        .li = .{ .w = w, .tag = "li" },
-
-        .form = .{ .w = w, .tag = "form" },
-        .input = .{ .w = w, .tag = "input" },
-        .textarea = .{ .w = w, .tag = "textarea" },
-        .button = .{ .w = w, .tag = "button" },
-        .label = .{ .w = w, .tag = "label" },
-        .select = .{ .w = w, .tag = "select" },
-        .option = .{ .w = w, .tag = "option" },
-
-        .h1 = .{ .w = w, .tag = "h1" },
-        .h2 = .{ .w = w, .tag = "h2" },
-        .h3 = .{ .w = w, .tag = "h3" },
-        .h4 = .{ .w = w, .tag = "h4" },
-        .h5 = .{ .w = w, .tag = "h5" },
-        .h6 = .{ .w = w, .tag = "h6" },
-        .h7 = .{ .w = w, .tag = "h7" },
-
-        .table = .{ .w = w, .tag = "table" },
-        .thead = .{ .w = w, .tag = "thead" },
-        .tbody = .{ .w = w, .tag = "tbody" },
-        .col = .{ .w = w, .tag = "col" },
-        .tr = .{ .w = w, .tag = "tr" },
-        .td = .{ .w = w, .tag = "td" },
-
-        .svg = .{ .w = w, .tag = "svg" },
-        .img = .{ .w = w, .tag = "img" },
-        .area = .{ .w = w, .tag = "area" },
-
-        .iframe = .{ .w = w, .tag = "iframe" },
-
-        .video = .{ .w = w, .tag = "video" },
-        .embed = .{ .w = w, .tag = "embed" },
-        .track = .{ .w = w, .tag = "track" },
-        .source = .{ .w = w, .tag = "source" },
-
-        .comment = .{ .w = w },
-    };
-
-    if (stack_arg) |stack| {
-        inline for (std.meta.fields(Self)) |field| {
+    inline for (std.meta.fields(Self)) |field| {
+        switch (field.type) {
             // initialize the stack field for each elem,
             // this is equivalent to doing manually:
+            //   self.html.w      = w;
             //   self.html.stack  = stack;
+            //   self.head.w      = w;
             //   self.head.stack  = stack;
+            //   self.title.w     = w;
             //   self.title.stack = stack;
             // ... and so on
-            const f: std.builtin.Type.StructField = field;
-            switch (f.type) {
-                Elem, CommentElem => {
-                    @field(self, f.name).stack = stack;
-                },
-                else => {},
-            }
+            inline CommentElem, VoidElem, Elem => |t| {
+                const EnumTags = std.meta.tags(std.meta.FieldEnum(t));
+                switch (t) {
+                    CommentElem => {
+                        for (EnumTags) |ff| switch (ff) {
+                            .w => @field(self, field.name).w = w,
+                            .stack => @field(self, field.name).stack = stack_arg,
+                        };
+                    },
+                    VoidElem => {
+                        for (EnumTags) |ff| switch (ff) {
+                            .w => @field(self, field.name).w = w,
+                            .tag => @field(self, field.name).tag = field.name,
+                        };
+                    },
+                    Elem => {
+                        for (EnumTags) |ff| switch (ff) {
+                            .w => @field(self, field.name).w = w,
+                            .tag => @field(self, field.name).tag = field.name,
+                            .stack => @field(self, field.name).stack = stack_arg,
+                        };
+                    },
+
+                    else => unreachable,
+                }
+            },
+
+            else => {
+                // initialize internal fields
+                const InternalEnum = std.meta.FieldEnum(@TypeOf(self.internal));
+                for (std.meta.tags(InternalEnum)) |ff| switch (ff) {
+                    .w => self.internal.w = w,
+                    .stack => self.internal.stack = stack_arg,
+                    // if a new field is added, initialize them here:
+                    //   .new_field => self.internal.new_field = something,
+                };
+            },
         }
     }
 
     return self;
 }
 
-pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
-    if (self.stack) |stack| {
+pub fn deinit(self: Self, allocator: Allocator) void {
+    if (self.internal.stack) |stack| {
         stack.items.deinit(allocator);
         allocator.destroy(stack);
     }
 }
 
 pub inline fn write(self: @This(), str: []const u8) !void {
-    return writeEscapedContent(self.w, str);
+    return writeEscapedContent(self.internal.w, str);
 }
 
-pub inline fn writeUnsafe(self: @This(), str: []const u8) !void {
-    return self.w.writeAll(str);
+pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
+    return self.internal.w.writeAll(str);
 }
 
 pub const Elem = struct {

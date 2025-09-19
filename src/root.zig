@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
-const Self = @This();
+const Zhtml = @This();
 
 const Error = error{
     ClosingTagMismatch,
@@ -106,9 +106,9 @@ pub fn initDebug(w: *std.Io.Writer, allocator: Allocator) !@This() {
 }
 
 fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
-    var self: Self = undefined;
+    var self: Zhtml = undefined;
 
-    inline for (std.meta.fields(Self)) |field| {
+    inline for (std.meta.fields(Zhtml)) |field| {
         switch (field.type) {
             // initialize the stack field for each elem,
             // this is equivalent to doing manually:
@@ -162,7 +162,7 @@ fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
     return self;
 }
 
-pub fn deinit(self: Self, allocator: Allocator) void {
+pub fn deinit(self: Zhtml, allocator: Allocator) void {
     if (self.internal.stack) |stack| {
         stack.items.deinit(allocator);
         allocator.destroy(stack);
@@ -175,6 +175,30 @@ pub inline fn write(self: @This(), str: []const u8) !void {
 
 pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
     return self.internal.w.writeAll(str);
+}
+
+pub fn print(
+    self: @This(),
+    gpa: Allocator,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    const str = try std.fmt.allocPrint(gpa, fmt, args);
+    defer gpa.free(str);
+
+    try writeEscapedContent(self.internal.w, str);
+}
+
+pub fn @"printUnsafe!?"(
+    self: @This(),
+    gpa: Allocator,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    const str = try std.fmt.allocPrint(gpa, fmt, args);
+    defer gpa.free(str);
+
+    try self.internal.w.writeAll(str);
 }
 
 pub const Elem = struct {
@@ -256,6 +280,34 @@ pub const Elem = struct {
     pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) !void {
         return self.w.writeAll(str);
     }
+
+    pub fn renderPrint(
+        self: @This(),
+        gpa: Allocator,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) !void {
+        const str = try std.fmt.allocPrint(gpa, fmt, args);
+        defer gpa.free(str);
+
+        try self.begin();
+        try writeEscapedContent(self.w, str);
+        try self.end();
+    }
+
+    pub fn @"renderPrintUnsafe!?"(
+        self: @This(),
+        gpa: Allocator,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) !void {
+        const str = try std.fmt.allocPrint(gpa, fmt, args);
+        defer gpa.free(str);
+
+        try self.begin();
+        try self.w.writeAll(str);
+        try self.end();
+    }
 };
 
 const CommentElem = struct {
@@ -316,8 +368,27 @@ const VoidElem = struct {
     }
 };
 
+const Formatter = struct {
+    arena: std.heap.ArenaAllocator,
+
+    pub fn init(gpa: Allocator) @This() {
+        return .{
+            .arena = .init(gpa),
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.arena.deinit();
+    }
+
+    pub fn print(self: *@This(), comptime fmt: []const u8, args: anytype) ![]const u8 {
+        const arena = self.arena.allocator();
+        return std.fmt.allocPrint(arena, fmt, args);
+    }
+};
+
 const TagStack = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     items: std.ArrayList([]const u8) = .empty,
     index: u8 = 0,
 
@@ -345,7 +416,7 @@ const TagStack = struct {
     }
 };
 
-fn writeAttributes(w: *std.Io.Writer, args: anytype) !void {
+inline fn writeAttributes(w: *std.Io.Writer, args: anytype) !void {
     inline for (std.meta.fields(@TypeOf(args))) |field| {
         try w.print(" {s}=", .{field.name});
         try writeEscapedAttr(w, @field(args, field.name));
@@ -375,59 +446,12 @@ fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) !void {
     try w.writeByte('"');
 }
 
-test {
-    const allocator = std.testing.allocator;
-    var stderr = std.fs.File.stderr().writer(&.{});
-    const w = &stderr.interface;
-
-    const z: Self = .initDebug(w, allocator);
-    defer z.deinit(allocator);
-
-    const div, const span, const img = .{
-        z.div,
-        z.span,
-        z.img,
-    };
-
-    try span.@"<>"();
-    try span.write("asdfafds");
-    try span.@"</>"();
-    try z.write("\n");
-    try span.render("inside span");
-    try z.write("\n");
-
-    try img.render_(.{ .src = "blah" });
-
-    try z.write("\n");
-
-    try z.comment.begin();
-    try z.comment.end();
-    try z.write("\n");
-
-    try div.@"<=>"(.{ .id = "foo", .class = "blah" });
-    {
-        try span.render("<asdf");
-        try span.@"renderUnsafe!?"("<asdf");
-        try z.write("<test>");
-        try z.writeUnsafe("<test>");
-        //try component1.write();
-        //try component2.start();
-        {
-            // stuffs here
-        }
-        //try component2.end();
-    }
-
-    try div.@"</>"();
-    try z.write("\n");
-}
-
 test "matching mismatch closing tag" {
     const allocator = std.testing.allocator;
     var buf: std.Io.Writer.Discarding = .init(&.{});
     const w = &buf.writer;
 
-    const z: Self = .initDebug(w, allocator);
+    const z: Zhtml = try .initDebug(w, allocator);
     defer z.deinit(allocator);
 
     try z.div.begin();
@@ -448,8 +472,7 @@ test {
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
-    const w = &buf.writer;
-    const z: Self = .initDebug(w, allocator);
+    const z: Zhtml = try .initDebug(&buf.writer, allocator);
     defer z.deinit(allocator);
 
     try z.html.begin();
@@ -475,7 +498,11 @@ test {
         try z.body.begin();
         {
             try z.h1.render("heading");
-            try z.h1.render_(.{ .id = "test" }, "heading with id test");
+
+            try z.h1.render_(.{
+                .id = "test",
+            }, "heading with id test");
+
             try z.p.render(
                 \\This is a sentence 1.
                 \\ This is a sentence 2.
@@ -484,6 +511,96 @@ test {
         try z.body.end();
     }
     try z.html.end();
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test {
+    const expected =
+        \\<h1 id="id">heading</h1>
+        \\<h2>subheading</h2>
+        \\<ul>
+        \\  <li>item 0</li>
+        \\  <li>item 1</li>
+        \\  <li>item 2</li>
+        \\  <li>item 3</li>
+        \\  <li>item 4</li>
+        \\</ul>
+    ;
+
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .initDebug(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    const h1 = z.h1;
+    const h2 = z.h2;
+    const ul = z.ul;
+    const li = z.li;
+
+    {
+        try h1.render_(.{ .id = "id" }, "heading");
+        try z.write("\n");
+        try h2.render("subheading");
+        try z.write("\n");
+        try ul.begin();
+        try z.write("\n");
+        for (0..5) |i| {
+            try z.write("  ");
+            try li.renderPrint(allocator, "item {d}", .{i});
+            try z.write("\n");
+        }
+        try ul.end();
+    }
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "formatting and printing" {
+    const expected =
+        \\<div class="foo-123">
+        \\<div>1 2 3</div>
+        \\<div>4 5 6</div>
+        \\<div>7 8 9</div>
+        \\<div>10 11 12</div>
+        \\</div>
+    ;
+
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .initDebug(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    var fmt: Formatter = .init(allocator);
+    defer fmt.deinit();
+
+    const div = z.div;
+
+    try div.begin_(.{
+        .class = try fmt.print("foo-{d}", .{123}),
+    });
+    {
+        try z.print(allocator, "{s}", .{"\n"});
+        try div.renderPrint(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
+        try z.write("\n");
+        try div.render(try fmt.print("{d} {d} {d}", .{ 4, 5, 6 }));
+        try z.write("\n");
+        try div.@"renderPrintUnsafe!?"(allocator, "{d} {d} {d}", .{ 7, 8, 9 });
+        try z.write("\n");
+        try div.@"renderUnsafe!?"(try fmt.print("{d} {d} {d}", .{ 10, 11, 12 }));
+        try z.write("\n");
+    }
+    try div.end();
 
     const output = try buf.toOwnedSlice();
     defer allocator.free(output);

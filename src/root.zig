@@ -8,14 +8,13 @@ const Error = error{ClosingTagMismatch};
 const AllocatorError = Allocator.Error;
 const WriterError = std.Io.Writer.Error;
 
-// all elem fields will be initialized with
-// comptime reflection, other fields should
-// go into the internal sub-field
-
-internal: struct {
-    // all non-elem fields must be added here
-    // so that the compiler can detect which
-    // fields are not initialized
+_internal: struct {
+    // All elem fields will be initialized with
+    // comptime reflection, other fields should
+    // go here so that it's easier to initialize
+    // them properly.
+    //
+    // It also keeps the public API clean and tidy.
     w: *std.Io.Writer,
     stack: ?*TagStack,
 },
@@ -112,33 +111,35 @@ fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
         switch (field.type) {
             // initialize the stack field for each elem,
             // this is equivalent to doing manually:
-            //   self.html.w      = w;
-            //   self.html.stack  = stack;
-            //   self.head.w      = w;
-            //   self.head.stack  = stack;
-            //   self.title.w     = w;
-            //   self.title.stack = stack;
+            //   self.html  = .{ ... };
+            //   self.head  = .{ ... };
+            //   self.title = .{ ... };
             // ... and so on
             inline CommentElem, VoidElem, Elem => |t| {
-                const EnumTags = std.meta.tags(std.meta.FieldEnum(t));
                 switch (t) {
-                    CommentElem => {
-                        for (EnumTags) |ff| switch (ff) {
-                            .w => @field(self, field.name).w = w,
-                            .stack => @field(self, field.name).stack = stack_arg,
+                    VoidElem => {
+                        @field(self, field.name) = .{
+                            .tag = field.name,
+                            ._internal = .{
+                                .w = w,
+                            },
                         };
                     },
-                    VoidElem => {
-                        for (EnumTags) |ff| switch (ff) {
-                            .w => @field(self, field.name).w = w,
-                            .tag => @field(self, field.name).tag = field.name,
+                    CommentElem => {
+                        @field(self, field.name) = .{
+                            ._internal = .{
+                                .w = w,
+                                .stack = stack_arg,
+                            },
                         };
                     },
                     Elem => {
-                        for (EnumTags) |ff| switch (ff) {
-                            .w => @field(self, field.name).w = w,
-                            .tag => @field(self, field.name).tag = field.name,
-                            .stack => @field(self, field.name).stack = stack_arg,
+                        @field(self, field.name) = .{
+                            .tag = field.name,
+                            ._internal = .{
+                                .w = w,
+                                .stack = stack_arg,
+                            },
                         };
                     },
 
@@ -148,10 +149,10 @@ fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
 
             else => {
                 // initialize internal fields
-                const InternalEnum = std.meta.FieldEnum(@TypeOf(self.internal));
+                const InternalEnum = std.meta.FieldEnum(@TypeOf(self._internal));
                 for (std.meta.tags(InternalEnum)) |ff| switch (ff) {
-                    .w => self.internal.w = w,
-                    .stack => self.internal.stack = stack_arg,
+                    .w => self._internal.w = w,
+                    .stack => self._internal.stack = stack_arg,
                     // if a new field is added, initialize them here:
                     //   .new_field => self.internal.new_field = something,
                 };
@@ -163,18 +164,18 @@ fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
 }
 
 pub fn deinit(self: Zhtml, allocator: Allocator) void {
-    if (self.internal.stack) |stack| {
+    if (self._internal.stack) |stack| {
         stack.items.deinit(allocator);
         allocator.destroy(stack);
     }
 }
 
 pub inline fn write(self: @This(), str: []const u8) WriterError!void {
-    return writeEscapedContent(self.internal.w, str);
+    return writeEscapedContent(self._internal.w, str);
 }
 
 pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) WriterError!void {
-    return self.internal.w.writeAll(str);
+    return self._internal.w.writeAll(str);
 }
 
 pub fn print(
@@ -186,7 +187,7 @@ pub fn print(
     const str = try std.fmt.allocPrint(gpa, fmt, args);
     defer gpa.free(str);
 
-    try writeEscapedContent(self.internal.w, str);
+    try writeEscapedContent(self._internal.w, str);
 }
 
 pub fn @"printUnsafe!?"(
@@ -198,43 +199,58 @@ pub fn @"printUnsafe!?"(
     const str = try std.fmt.allocPrint(gpa, fmt, args);
     defer gpa.free(str);
 
-    try self.internal.w.writeAll(str);
+    try self._internal.w.writeAll(str);
 }
 
 pub const Elem = struct {
-    w: *std.Io.Writer,
-    stack: ?*TagStack = null,
     tag: []const u8,
+    _internal: struct {
+        w: *std.Io.Writer,
+        stack: ?*TagStack = null,
+    },
+
+    pub fn init(tag: []const u8, zhtml: Zhtml) Elem {
+        return .{
+            .tag = tag,
+            ._internal = .{
+                .w = zhtml._internal.w,
+                .stack = zhtml._internal.stack,
+            },
+        };
+    }
 
     pub fn begin_(self: @This()) WriterError!void {
-        if (builtin.mode == .Debug) if (self.stack) |stack| {
+        const w = self._internal.w;
+        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
             stack.push(self.tag);
         };
 
-        try self.w.writeAll("<");
-        try self.w.writeAll(self.tag);
-        try self.w.writeAll(">");
+        try w.writeAll("<");
+        try w.writeAll(self.tag);
+        try w.writeAll(">");
     }
 
     pub fn begin(self: @This(), args: anytype) WriterError!void {
-        if (builtin.mode == .Debug) if (self.stack) |stack| {
+        const w = self._internal.w;
+        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
             stack.push(self.tag);
         };
 
-        try self.w.writeAll("<");
-        try self.w.writeAll(self.tag);
-        try writeAttributes(self.w, args);
-        try self.w.writeAll(">");
+        try w.writeAll("<");
+        try w.writeAll(self.tag);
+        try writeAttributes(w, args);
+        try w.writeAll(">");
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
-        if (builtin.mode == .Debug) if (self.stack) |stack| {
+        const w = self._internal.w;
+        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
             try stack.checkMatching(self.tag);
         };
 
-        try self.w.writeAll("</");
-        try self.w.writeAll(self.tag);
-        try self.w.writeAll(">");
+        try w.writeAll("</");
+        try w.writeAll(self.tag);
+        try w.writeAll(">");
     }
 
     pub inline fn @"<>"(self: @This()) WriterError!void {
@@ -255,7 +271,7 @@ pub const Elem = struct {
         str: []const u8,
     ) (Error || AllocatorError || WriterError)!void {
         try self.begin(args);
-        try writeEscapedContent(self.w, str);
+        try writeEscapedContent(self._internal.w, str);
         try self.end();
     }
 
@@ -264,52 +280,67 @@ pub const Elem = struct {
         str: []const u8,
     ) (Error || AllocatorError || WriterError)!void {
         try self.begin_();
-        try writeEscapedContent(self.w, str);
+        try writeEscapedContent(self._internal.w, str);
         try self.end();
     }
 };
 
 const CommentElem = struct {
-    w: *std.Io.Writer,
-    stack: ?*TagStack = null,
+    _internal: struct {
+        w: *std.Io.Writer,
+        stack: ?*TagStack = null,
+    },
 
     pub fn begin_(self: @This()) WriterError!void {
-        if (builtin.mode == .Debug) if (self.stack) |stack| {
+        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
             stack.push("!----");
         };
-        try self.w.writeAll("<!-- ");
+        try self._internal.w.writeAll("<!-- ");
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
-        if (builtin.mode == .Debug) if (self.stack) |stack| {
+        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
             try stack.checkMatching("!----");
         };
 
-        try self.w.writeAll(" -->");
+        try self._internal.w.writeAll(" -->");
     }
 
     pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
         try self.begin_();
-        try writeEscapedContent(self.w, str);
+        try writeEscapedContent(self._internal.w, str);
         try self.end();
     }
 };
 
 const VoidElem = struct {
-    w: *std.Io.Writer,
     tag: []const u8,
+    _internal: struct {
+        w: *std.Io.Writer,
+    },
+
+    pub fn init(tag: []const u8, zhtml: Zhtml) Elem {
+        return .{
+            .tag = tag,
+            ._internal = .{
+                .w = zhtml._internal.w,
+            },
+        };
+    }
 
     pub fn render(self: @This(), args: anytype) WriterError!void {
-        try self.w.writeAll("<");
-        try self.w.writeAll(self.tag);
-        try writeAttributes(self.w, args);
-        try self.w.writeAll(">");
+        const w = self._internal.w;
+        try w.writeAll("<");
+        try w.writeAll(self.tag);
+        try writeAttributes(w, args);
+        try w.writeAll(">");
     }
 
     pub fn render_(self: @This()) WriterError!void {
-        try self.w.writeAll("<");
-        try self.w.writeAll(self.tag);
-        try self.w.writeAll(">");
+        const w = self._internal.w;
+        try w.writeAll("<");
+        try w.writeAll(self.tag);
+        try w.writeAll(">");
     }
 };
 

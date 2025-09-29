@@ -107,6 +107,11 @@ pub fn initDebug(w: *std.Io.Writer, allocator: Allocator) AllocatorError!@This()
 fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
     var self: Zhtml = undefined;
 
+    self._internal = .{
+        .w = w,
+        .stack = stack_arg,
+    };
+
     inline for (std.meta.fields(Zhtml)) |field| {
         switch (field.type) {
             // initialize the stack field for each elem,
@@ -147,16 +152,7 @@ fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
                 }
             },
 
-            else => {
-                // initialize internal fields
-                const InternalEnum = std.meta.FieldEnum(@TypeOf(self._internal));
-                for (std.meta.tags(InternalEnum)) |ff| switch (ff) {
-                    .w => self._internal.w = w,
-                    .stack => self._internal.stack = stack_arg,
-                    // if a new field is added, initialize them here:
-                    //   .new_field => self.internal.new_field = something,
-                };
-            },
+            else => {},
         }
     }
 

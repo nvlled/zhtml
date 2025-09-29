@@ -302,7 +302,7 @@ const CommentElem = struct {
         try self._internal.w.writeAll(" -->");
     }
 
-    pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
+    pub fn render_(self: @This(), str: []const u8) (Error || WriterError)!void {
         try self.begin_();
         try writeEscapedContent(self._internal.w, str);
         try self.end();
@@ -337,6 +337,14 @@ const VoidElem = struct {
         try w.writeAll("<");
         try w.writeAll(self.tag);
         try w.writeAll(">");
+    }
+
+    pub inline fn @"<=>"(self: @This(), args: anytype) WriterError!void {
+        return self.render(args);
+    }
+
+    pub inline fn @"<>"(self: @This()) (Error || WriterError)!void {
+        return self.render_();
     }
 };
 
@@ -453,7 +461,7 @@ test {
 
     try z.html.begin_();
     {
-        try z.comment.render("some comment here");
+        try z.comment.render_("some comment here");
         try z.head.begin_();
         {
             try z.title.render_("page title");

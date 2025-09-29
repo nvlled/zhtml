@@ -400,10 +400,20 @@ const TagStack = struct {
     }
 };
 
+const SpecialAttributes = enum {
+    @"--unpack",
+};
+
 inline fn writeAttributes(w: *std.Io.Writer, args: anytype) WriterError!void {
     inline for (std.meta.fields(@TypeOf(args))) |field| {
-        try w.print(" {s}=", .{field.name});
-        try writeEscapedAttr(w, @field(args, field.name));
+        if (comptime std.meta.stringToEnum(SpecialAttributes, field.name)) |t| {
+            switch (t) {
+                inline .@"--unpack" => try writeAttributes(w, @field(args, field.name)),
+            }
+        } else {
+            try w.print(" {s}=", .{field.name});
+            try writeEscapedAttr(w, @field(args, field.name));
+        }
     }
 }
 

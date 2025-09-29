@@ -94,7 +94,7 @@ source: VoidElem,
 
 comment: CommentElem,
 
-pub fn init(w: *std.Io.Writer) !@This() {
+pub fn init(w: *std.Io.Writer) @This() {
     return initWithStack(w, null);
 }
 
@@ -466,7 +466,11 @@ test {
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
-    const z: Zhtml = try .initDebug(&buf.writer, allocator);
+    const z: Zhtml = if (builtin.mode == .Debug)
+        try .initDebug(&buf.writer, allocator)
+    else
+        .init(&buf.writer);
+
     defer z.deinit(allocator);
 
     try z.html.begin_();

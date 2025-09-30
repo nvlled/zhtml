@@ -10,7 +10,7 @@ const WriterError = std.Io.Writer.Error;
 
 const Internal = struct {
     w: *std.Io.Writer,
-    stack: ?*TagStack, // TODO: make non optional
+    stack: *TagStack,
     pending_attrs: *PendingAttrs,
 };
 
@@ -137,10 +137,8 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
 }
 
 pub fn deinit(self: Zhtml, allocator: Allocator) void {
-    if (self._internal.stack) |stack| {
-        stack.items.deinit(allocator);
-        allocator.destroy(stack);
-    }
+    self._internal.stack.items.deinit(allocator);
+    allocator.destroy(self._internal.stack);
     allocator.destroy(self._internal.pending_attrs);
 }
 
@@ -201,9 +199,9 @@ pub const Elem = struct {
 
     pub fn begin(self: @This()) (Error || WriterError)!void {
         const z = self._internal;
-        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
-            stack.push(self.tag);
-        };
+        if (builtin.mode == .Debug) {
+            z.stack.push(self.tag);
+        }
 
         try z.w.writeAll("<");
         try z.w.writeAll(self.tag);
@@ -212,14 +210,14 @@ pub const Elem = struct {
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
-        const w = self._internal.w;
-        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
-            try stack.checkMatching(self.tag);
-        };
+        const z = self._internal;
+        if (builtin.mode == .Debug) {
+            try z.stack.checkMatching(self.tag);
+        }
 
-        try w.writeAll("</");
-        try w.writeAll(self.tag);
-        try w.writeAll(">");
+        try z.w.writeAll("</");
+        try z.w.writeAll(self.tag);
+        try z.w.writeAll(">");
     }
 
     pub fn render(
@@ -272,16 +270,16 @@ const CommentElem = struct {
     _internal: Internal,
 
     pub fn begin_(self: @This()) WriterError!void {
-        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
-            stack.push("!----");
-        };
+        if (builtin.mode == .Debug) {
+            self._internal.stack.push("!----");
+        }
         try self._internal.w.writeAll("<!-- ");
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
-        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
-            try stack.checkMatching("!----");
-        };
+        if (builtin.mode == .Debug) {
+            try self._internal.stack.checkMatching("!----");
+        }
 
         try self._internal.w.writeAll(" -->");
     }
@@ -646,7 +644,7 @@ test "formatting and printing" {
     try div.@"<>"();
     {
         try z.print(allocator, "{s}", .{"\n"});
-        try z.div.render(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
+        try z.div.renderf(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
 
         try z.write("\n");
         try div.@"<=>"(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));

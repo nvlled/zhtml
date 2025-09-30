@@ -4,20 +4,23 @@ const Allocator = std.mem.Allocator;
 
 const Zhtml = @This();
 
-const Error = error{ClosingTagMismatch};
+const Error = error{ ClosingTagMismatch, TooManyAttrs, TagAttrMismatch };
 const AllocatorError = Allocator.Error;
 const WriterError = std.Io.Writer.Error;
 
-_internal: struct {
-    // All elem fields will be initialized with
-    // comptime reflection, other fields should
-    // go here so that it's easier to initialize
-    // them properly.
-    //
-    // It also keeps the public API clean and tidy.
+const Internal = struct {
     w: *std.Io.Writer,
-    stack: ?*TagStack,
-},
+    stack: ?*TagStack, // TODO: make non optional
+    pending_attrs: *PendingAttrs,
+};
+
+// All elem fields will be initialized with
+// comptime reflection, other fields should
+// go here so that it's easier to initialize
+// them properly.
+//
+// It also keeps the public API clean and tidy.
+_internal: Internal,
 
 html: Elem,
 head: Elem,
@@ -94,22 +97,19 @@ source: VoidElem,
 
 comment: CommentElem,
 
-pub fn init(w: *std.Io.Writer) @This() {
-    return initWithStack(w, null);
-}
+pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
+    var self: Zhtml = undefined;
 
-pub fn initDebug(w: *std.Io.Writer, allocator: Allocator) AllocatorError!@This() {
     const stack = try allocator.create(TagStack);
     stack.* = .{ .allocator = allocator };
-    return initWithStack(w, stack);
-}
 
-fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
-    var self: Zhtml = undefined;
+    const pattrs = try allocator.create(PendingAttrs);
+    pattrs.* = .{};
 
     self._internal = .{
         .w = w,
-        .stack = stack_arg,
+        .stack = stack,
+        .pending_attrs = pattrs,
     };
 
     inline for (std.meta.fields(Zhtml)) |field| {
@@ -120,36 +120,13 @@ fn initWithStack(w: *std.Io.Writer, stack_arg: ?*TagStack) @This() {
             //   self.head  = .{ ... };
             //   self.title = .{ ... };
             // ... and so on
-            inline CommentElem, VoidElem, Elem => |t| {
-                switch (t) {
-                    VoidElem => {
-                        @field(self, field.name) = .{
-                            .tag = field.name,
-                            ._internal = .{
-                                .w = w,
-                            },
-                        };
-                    },
-                    CommentElem => {
-                        @field(self, field.name) = .{
-                            ._internal = .{
-                                .w = w,
-                                .stack = stack_arg,
-                            },
-                        };
-                    },
-                    Elem => {
-                        @field(self, field.name) = .{
-                            .tag = field.name,
-                            ._internal = .{
-                                .w = w,
-                                .stack = stack_arg,
-                            },
-                        };
-                    },
+            CommentElem => @field(self, field.name) = .{
+                ._internal = self._internal,
+            },
 
-                    else => unreachable,
-                }
+            VoidElem, Elem => @field(self, field.name) = .{
+                .tag = field.name,
+                ._internal = self._internal,
             },
 
             else => {},
@@ -164,6 +141,15 @@ pub fn deinit(self: Zhtml, allocator: Allocator) void {
         stack.items.deinit(allocator);
         allocator.destroy(stack);
     }
+    allocator.destroy(self._internal.pending_attrs);
+}
+
+pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
+    return self._internal.pending_attrs.add(key, value);
+}
+
+pub fn attrs(self: @This(), args: anytype) Error!void {
+    return self._internal.pending_attrs.addMany(args);
 }
 
 pub inline fn write(self: @This(), str: []const u8) WriterError!void {
@@ -200,10 +186,7 @@ pub fn @"printUnsafe!?"(
 
 pub const Elem = struct {
     tag: []const u8,
-    _internal: struct {
-        w: *std.Io.Writer,
-        stack: ?*TagStack = null,
-    },
+    _internal: Internal,
 
     pub fn init(tag: []const u8, zhtml: Zhtml) Elem {
         return .{
@@ -211,31 +194,21 @@ pub const Elem = struct {
             ._internal = .{
                 .w = zhtml._internal.w,
                 .stack = zhtml._internal.stack,
+                .pending_attrs = zhtml._internal.pending_attrs,
             },
         };
     }
 
-    pub fn begin_(self: @This()) WriterError!void {
-        const w = self._internal.w;
+    pub fn begin(self: @This()) (Error || WriterError)!void {
+        const z = self._internal;
         if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
             stack.push(self.tag);
         };
 
-        try w.writeAll("<");
-        try w.writeAll(self.tag);
-        try w.writeAll(">");
-    }
-
-    pub fn begin(self: @This(), args: anytype) WriterError!void {
-        const w = self._internal.w;
-        if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
-            stack.push(self.tag);
-        };
-
-        try w.writeAll("<");
-        try w.writeAll(self.tag);
-        try writeAttributes(w, args);
-        try w.writeAll(">");
+        try z.w.writeAll("<");
+        try z.w.writeAll(self.tag);
+        try z.pending_attrs.writeAndClear(self.tag, z.w);
+        try z.w.writeAll(">");
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
@@ -249,43 +222,54 @@ pub const Elem = struct {
         try w.writeAll(">");
     }
 
-    pub inline fn @"<>"(self: @This()) WriterError!void {
-        return self.begin_();
+    pub fn render(
+        self: @This(),
+        str: []const u8,
+    ) (Error || AllocatorError || WriterError)!void {
+        try self.begin();
+        try writeEscapedContent(self._internal.w, str);
+        try self.end();
     }
 
-    pub fn @"<=>"(self: @This(), args: anytype) WriterError!void {
-        return self.begin(args);
+    pub fn renderf(
+        self: @This(),
+        allocator: Allocator,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) (Error || AllocatorError || WriterError)!void {
+        const str = try std.fmt.allocPrint(allocator, fmt, args);
+        defer allocator.free(str);
+        try self.render(str);
+    }
+
+    pub inline fn @"<>"(self: @This()) (Error || WriterError)!void {
+        return self.begin();
     }
 
     pub fn @"</>"(self: @This()) (Error || WriterError)!void {
         return self.end();
     }
 
-    pub fn render(
+    pub fn @"<=>"(
         self: @This(),
-        args: anytype,
         str: []const u8,
     ) (Error || AllocatorError || WriterError)!void {
-        try self.begin(args);
-        try writeEscapedContent(self._internal.w, str);
-        try self.end();
+        return self.render(str);
     }
 
-    pub fn render_(
-        self: @This(),
-        str: []const u8,
-    ) (Error || AllocatorError || WriterError)!void {
-        try self.begin_();
-        try writeEscapedContent(self._internal.w, str);
-        try self.end();
+    pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
+        self._internal.pending_attrs.tag = self.tag;
+        return self._internal.pending_attrs.add(key, value);
+    }
+
+    pub fn attrs(self: @This(), args: anytype) Error!void {
+        self._internal.pending_attrs.tag = self.tag;
+        return self._internal.pending_attrs.addMany(args);
     }
 };
 
 const CommentElem = struct {
-    _internal: struct {
-        w: *std.Io.Writer,
-        stack: ?*TagStack = null,
-    },
+    _internal: Internal,
 
     pub fn begin_(self: @This()) WriterError!void {
         if (builtin.mode == .Debug) if (self._internal.stack) |stack| {
@@ -302,49 +286,121 @@ const CommentElem = struct {
         try self._internal.w.writeAll(" -->");
     }
 
-    pub fn render_(self: @This(), str: []const u8) (Error || WriterError)!void {
+    pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
+        self._internal.pending_attrs.clear();
         try self.begin_();
         try writeEscapedContent(self._internal.w, str);
         try self.end();
+    }
+
+    pub fn renderf(
+        self: @This(),
+        allocator: Allocator,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) (Error || AllocatorError || WriterError)!void {
+        const str = try std.fmt.allocPrint(allocator, fmt, args);
+        defer allocator.free(str);
+        try self.render(str);
+    }
+
+    pub fn @"<=>"(
+        self: @This(),
+        str: []const u8,
+    ) (Error || AllocatorError || WriterError)!void {
+        return self.render(str);
     }
 };
 
 const VoidElem = struct {
     tag: []const u8,
-    _internal: struct {
-        w: *std.Io.Writer,
-    },
+    _internal: Internal,
 
     pub fn init(tag: []const u8, zhtml: Zhtml) Elem {
         return .{
             .tag = tag,
             ._internal = .{
                 .w = zhtml._internal.w,
+                .pending_attrs = zhtml._internal.pending_attrs,
             },
         };
     }
 
-    pub fn render(self: @This(), args: anytype) WriterError!void {
-        const w = self._internal.w;
-        try w.writeAll("<");
-        try w.writeAll(self.tag);
-        try writeAttributes(w, args);
-        try w.writeAll(">");
-    }
-
-    pub fn render_(self: @This()) WriterError!void {
-        const w = self._internal.w;
-        try w.writeAll("<");
-        try w.writeAll(self.tag);
-        try w.writeAll(">");
-    }
-
-    pub inline fn @"<=>"(self: @This(), args: anytype) WriterError!void {
-        return self.render(args);
+    pub fn render(self: @This()) (Error || WriterError)!void {
+        const z = self._internal;
+        try z.w.writeAll("<");
+        try z.w.writeAll(self.tag);
+        try z.pending_attrs.writeAndClear(self.tag, z.w);
+        try z.w.writeAll(">");
     }
 
     pub inline fn @"<>"(self: @This()) (Error || WriterError)!void {
-        return self.render_();
+        return self.render();
+    }
+
+    pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
+        self._internal.pending_attrs.tag = self.tag;
+        return self._internal.pending_attrs.add(key, value);
+    }
+
+    pub fn attrs(self: @This(), args: anytype) Error!void {
+        self._internal.pending_attrs.tag = self.tag;
+        return self._internal.pending_attrs.addMany(args);
+    }
+};
+
+const PendingAttrs = struct {
+    index: usize = 0,
+    tag: []const u8 = "",
+    attrs: [512]struct { []const u8, []const u8 } = undefined,
+
+    fn add(self: *@This(), key_arg: anytype, value: []const u8) Error!void {
+        if (self.index >= self.attrs.len) return Error.TooManyAttrs;
+        const key = switch (@typeInfo(@TypeOf(key_arg))) {
+            .enum_literal => @tagName(key_arg),
+            else => key_arg,
+        };
+        self.attrs[self.index] = .{ key, value };
+        self.index += 1;
+    }
+
+    fn addMany(self: *@This(), args: anytype) Error!void {
+        inline for (std.meta.fields(@TypeOf(args))) |field| {
+            try self.add(field.name, @field(args, field.name));
+        }
+    }
+
+    fn clear(self: *@This()) void {
+        self.index = 0;
+    }
+
+    fn writeAndClear(self: *@This(), tag: []const u8, w: *std.Io.Writer) !void {
+        if (self.index > 0) {
+            if (builtin.mode == .Debug and
+                self.tag.len > 0 and
+                !std.mem.eql(u8, tag, self.tag))
+            {
+                std.debug.print(
+                    \\
+                    \\expected tag <{s}> for the attrs of <{s}>
+                    \\tag and attr must match: z.div.attr(...); z.div.begin();
+                    \\or use z.attr() to skip checking
+                    \\
+                ,
+                    .{ tag, self.tag },
+                );
+                return Error.TagAttrMismatch;
+            }
+        }
+
+        for (0..self.index) |i| {
+            const key, const value = self.attrs[i];
+            try w.writeByte(' ');
+            try w.writeAll(key);
+            try w.writeByte('=');
+            try writeEscapedAttr(w, value);
+        }
+        self.index = 0;
     }
 };
 
@@ -445,10 +501,10 @@ test "matching mismatch closing tag" {
     var buf: std.Io.Writer.Discarding = .init(&.{});
     const w = &buf.writer;
 
-    const z: Zhtml = try .initDebug(w, allocator);
+    const z: Zhtml = try .init(w, allocator);
     defer z.deinit(allocator);
 
-    try z.div.begin_();
+    try z.div.begin();
     const err = z.span.end();
 
     try std.testing.expectError(Error.ClosingTagMismatch, err);
@@ -467,22 +523,21 @@ test {
     defer buf.deinit();
 
     const z: Zhtml = if (builtin.mode == .Debug)
-        try .initDebug(&buf.writer, allocator)
+        try .init(&buf.writer, allocator)
     else
-        .init(&buf.writer);
+        .init(&buf.writer, allocator);
 
     defer z.deinit(allocator);
 
-    try z.html.begin_();
+    try z.html.begin();
     {
-        try z.comment.render_("some comment here");
-        try z.head.begin_();
+        try z.comment.render("some comment here");
+        try z.head.begin();
         {
-            try z.title.render_("page title");
-            try z.meta.render(.{
-                .charset = "utf-8",
-            });
-            try z.style.begin_();
+            try z.title.render("page title");
+            try z.meta.attr(.charset, "utf-8");
+            try z.meta.render();
+            try z.style.begin();
             {
                 try z.@"writeUnsafe!?"(
                     \\
@@ -494,15 +549,14 @@ test {
         }
         try z.head.end();
 
-        try z.body.begin_();
+        try z.body.begin();
         {
-            try z.h1.render_("heading");
+            try z.h1.render("heading");
 
-            try z.h1.render(.{
-                .id = "test",
-            }, "heading with id test");
+            try z.h1.attr(.id, "test");
+            try z.h1.render("heading with id test");
 
-            try z.p.render_(
+            try z.p.render(
                 \\This is a sentence 1.
                 \\ This is a sentence 2.
             );
@@ -534,7 +588,7 @@ test {
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
-    const z: Zhtml = try .initDebug(&buf.writer, allocator);
+    const z: Zhtml = try .init(&buf.writer, allocator);
     defer z.deinit(allocator);
 
     const h1 = z.h1;
@@ -543,16 +597,18 @@ test {
     const li = z.li;
 
     {
-        try h1.render(.{ .id = "id" }, "heading");
+        try h1.attr(.id, "id");
+        try h1.render("heading");
+
         try z.write("\n");
-        try h2.render_("subheading");
+        try h2.render("subheading");
         try z.write("\n");
-        try ul.begin_();
+        try ul.begin();
         try z.write("\n");
         for (0..10) |i| {
             if (i % 2 != 0) continue;
             try z.write("  ");
-            try li.begin_();
+            try li.begin();
             try z.print(allocator, "item {d}", .{i});
             try li.end();
             try z.write("\n");
@@ -578,7 +634,7 @@ test "formatting and printing" {
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
-    const z: Zhtml = try .initDebug(&buf.writer, allocator);
+    const z: Zhtml = try .init(&buf.writer, allocator);
     defer z.deinit(allocator);
 
     var fmt: Formatter = .init(allocator);
@@ -586,26 +642,63 @@ test "formatting and printing" {
 
     const div = z.div;
 
-    try div.begin(.{
-        .class = try fmt.string("foo-{d}", .{123}),
-    });
+    try div.attr(.class, try fmt.string("foo-{d}", .{123}));
+    try div.@"<>"();
     {
         try z.print(allocator, "{s}", .{"\n"});
-
-        try div.begin_();
-        try z.print(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
-        try div.end();
+        try z.div.render(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
 
         try z.write("\n");
-        try div.render_(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
+        try div.@"<=>"(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
         try z.write("\n");
     }
-    try div.end();
+    try div.@"</>"();
 
     const output = try buf.toOwnedSlice();
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(expected, output);
+}
+
+test "pending attrs" {
+    const expected =
+        \\<div a="1" c="2"><img id="im" src="/"></div>
+    ;
+
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    try z.div.attr(.a, "1");
+    try z.div.attrs(.{ .c = "2" });
+    try z.div.@"<>"();
+    {
+        try z.img.attr(.id, "im");
+        try z.img.attr(.src, "/");
+        try z.img.@"<>"();
+    }
+    try z.div.@"</>"();
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(expected, output);
+}
+
+test "mismatched tag-attr" {
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    try z.p.attrs(.{ .c = "2" });
+    const err = z.div.@"<>"();
+    try std.testing.expectError(Error.TagAttrMismatch, err);
 }
 
 test {

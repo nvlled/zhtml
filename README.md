@@ -6,19 +6,22 @@ A simple low-abstraction HTML templating library for zig.
 The templating language uses ordinary zig code: 
 
 ```zig
-try h1.render(.{ .id = "id" }, "heading");
-try h2.render_("subheading");
+h1.attr(.id, "id");
+if (falseCond)
+  h1.attr(.class, "foo");
+h1.render("heading");
 
-try ul.begin_();
+h2.@"<>"();
+z.write("subheading");
+h2.@"</>"();
+
+ul.begin();
 for (0..5) |i| {
     if (i % 2 == 0) {
-      try li.begin_();
-      try z.print(allocator, "item {d}", .{i});
-      try li.end();
-      // or try li.render(try fmt.string("item {d}", .{i}));
+      li.print(allocator, "item {d}", .{i});
     }
 }
-try ul.end();
+ul.end();
 
 // output:
 // <h1 id="id">heading</h1>

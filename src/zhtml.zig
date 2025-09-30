@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const Zhtml = @This();
-const Wrapped = @import("./root2.zig");
 
 pub const Error = error{ ClosingTagMismatch, TooManyAttrs, TagAttrMismatch };
 pub const AllocatorError = Allocator.Error;
@@ -84,7 +83,7 @@ const Internal = struct {
 // It also keeps the public API clean and tidy.
 _internal: *Internal,
 
-notry: @import("./root2.zig"),
+notry: @import("./zhtml-notry.zig"),
 
 html: Elem,
 head: Elem,
@@ -789,7 +788,6 @@ test "mismatched tag-attr" {
 test {
     if (builtin.mode == .Debug) {
         std.testing.refAllDeclsRecursive(Zhtml);
-        std.testing.refAllDeclsRecursive(Wrapped);
     }
 }
 

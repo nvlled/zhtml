@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
-const Zhtml = @import("./root.zig");
+const Zhtml = @import("./zhtml.zig");
 
 _zhtml: *Zhtml,
 
@@ -492,4 +492,10 @@ test "last error" {
     z.div.@"<>"();
     z.p.@"</>"();
     try std.testing.expectError(Zhtml.Error.ClosingTagMismatch, z.getLastError());
+}
+
+test {
+    if (builtin.mode == .Debug) {
+        std.testing.refAllDeclsRecursive(@This());
+    }
 }

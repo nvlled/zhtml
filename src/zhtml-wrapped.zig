@@ -1,12 +1,20 @@
+//! This is a wrapper module for zhtml.
+//!
+//! It wraps each function such that the error is handled and stored internally.
+//! What this means is that it avoids having to use `try` or explicitly handle
+//! errors (except for allocation errors) for the elem methods. If an error
+//! occured, further calls will be no-op, not even an attempt to write.
+//!
+//! To do explicit error-handling, use `zhtml.unwrap`.
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Zhtml = @import("./zhtml.zig");
+const ZhtmlWrapped = @This();
 
 const Internal = struct {
-    // only used for internal debugging, do not use for other purposes
-    // TODO: well actually I should just figure out how to create a Writer
-    // from a fixed sized array
+    // TODO: should probably just use a fixed buffer
+    // Allocator is only used for internal debugging, do not use for other purposes.
     allocator: Allocator,
 
     last_error: ?struct {
@@ -14,7 +22,7 @@ const Internal = struct {
         trace: []const u8,
     } = null,
 
-    inline fn clearError(self: *@This()) void {
+    fn clearError(self: *@This()) void {
         if (builtin.mode == .Debug) {
             if (self.last_error) |existing_err| {
                 self.allocator.free(existing_err.trace);
@@ -60,19 +68,20 @@ const Internal = struct {
         };
     }
 
-    fn getLastError(self: @This()) !void {
+    fn getError(self: @This()) !void {
         if (self.last_error) |err| {
             return err.value;
         }
     }
 
-    fn getLastErrorTrace(self: @This()) ?[]const u8 {
-        if (self.last_error) |err| {
-            return err.trace;
-        }
+    fn getErrorTrace(self: @This()) ?[]const u8 {
+        return if (self.last_error) |err|
+            err.trace
+        else
+            null;
     }
 
-    fn printLastErrorTrace(self: @This()) ?[]const u8 {
+    fn printErrorTrace(self: @This()) ?[]const u8 {
         if (self.last_error) |err| {
             std.debug.print("{s}\n", .{err.trace});
         }
@@ -81,6 +90,8 @@ const Internal = struct {
 
 _internal: *Internal,
 
+/// The unwrap module. Use this when explicit
+/// error-handling is desired.
 unwrap: *Zhtml,
 
 html: Elem,
@@ -185,6 +196,10 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
             // If there's a compile error saying:
             //   no field named 'XYZ' in struct 'zhtml-wrapped'
             // it means `XYZ: Elem` must be added above.
+            //
+            // The shorthand `.init` isn't used here since
+            // this uses reflection, and being explicit
+            // gives better compiler error message.
             Zhtml.CommentElem => @field(self, field.name) = .{
                 .unwrap = Zhtml.CommentElem.init(self.unwrap),
                 ._internal = self._internal,
@@ -217,40 +232,40 @@ inline fn setLastError(self: @This(), err: anytype) void {
     self._internal.setError(err);
 }
 
-pub inline fn clearError(self: @This()) void {
+pub fn clearError(self: @This()) void {
     self._internal.clearError();
 }
 
-pub inline fn getError(self: @This()) !void {
-    return self._internal.getLastError();
+pub fn getError(self: @This()) !void {
+    return self._internal.getError();
 }
 
-pub inline fn getErrorTrace(self: @This()) ?[]const u8 {
-    return self._internal.getLastErrorTrace();
+pub fn getErrorTrace(self: @This()) ?[]const u8 {
+    return self._internal.getErrorTrace();
 }
 
-pub inline fn attr(self: @This(), key: anytype, value: []const u8) void {
+pub fn attr(self: @This(), key: anytype, value: []const u8) void {
     self.getError() catch return;
     self.unwrap.attr(key, value) catch |err| {
         self.setLastError(err);
     };
 }
 
-pub inline fn attrs(self: @This(), args: anytype) void {
+pub fn attrs(self: @This(), args: anytype) void {
     self.getError() catch return;
     self.unwrap.attrs(args) catch |err| {
         self.setLastError(err);
     };
 }
 
-pub inline fn write(self: @This(), str: []const u8) void {
+pub fn write(self: @This(), str: []const u8) void {
     self.getError() catch return;
     self.unwrap.write(str) catch |err| {
         self.setLastError(err);
     };
 }
 
-pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) void {
+pub fn @"writeUnsafe!?"(self: @This(), str: []const u8) void {
     self.getError() catch return;
     self.unwrap.@"writeUnsafe!?"(str) catch |err| {
         self.setLastError(err);
@@ -298,19 +313,19 @@ pub const Elem = struct {
         };
     }
 
-    pub inline fn begin(self: @This()) void {
+    pub fn begin(self: @This()) void {
         invokeUnwrap(self, "begin", .{}) catch {};
     }
 
-    pub inline fn end(self: @This()) void {
+    pub fn end(self: @This()) void {
         invokeUnwrap(self, "end", .{}) catch {};
     }
 
-    pub inline fn render(self: @This(), str: []const u8) void {
+    pub fn render(self: @This(), str: []const u8) void {
         invokeUnwrap(self, "render", .{str}) catch {};
     }
 
-    pub inline fn renderf(
+    pub fn renderf(
         self: @This(),
         allocator: Allocator,
         comptime fmt: []const u8,
@@ -328,11 +343,11 @@ pub const Elem = struct {
         };
     }
 
-    pub inline fn @"<>"(self: @This()) void {
+    pub fn @"<>"(self: @This()) void {
         invokeUnwrap(self, "begin", .{}) catch {};
     }
 
-    pub inline fn @"</>"(self: @This()) void {
+    pub fn @"</>"(self: @This()) void {
         invokeUnwrap(self, "end", .{}) catch {};
     }
 
@@ -340,11 +355,11 @@ pub const Elem = struct {
         invokeUnwrap(self, "render", .{str}) catch {};
     }
 
-    pub inline fn attr(self: @This(), key: anytype, value: []const u8) void {
+    pub fn attr(self: @This(), key: anytype, value: []const u8) void {
         invokeUnwrap(self, "attr", .{ key, value }) catch {};
     }
 
-    pub inline fn attrs(self: @This(), args: anytype) void {
+    pub fn attrs(self: @This(), args: anytype) void {
         invokeUnwrap(self, "attrs", .{args}) catch {};
     }
 };
@@ -353,19 +368,19 @@ const CommentElem = struct {
     unwrap: Zhtml.CommentElem,
     _internal: *Internal,
 
-    pub inline fn begin_(self: @This()) void {
+    pub fn begin_(self: @This()) void {
         invokeUnwrap(self, "begin", .{}) catch {};
     }
 
-    pub inline fn end(self: @This()) void {
+    pub fn end(self: @This()) void {
         invokeUnwrap(self, "end", .{}) catch {};
     }
 
-    pub inline fn render(self: @This(), str: []const u8) void {
+    pub fn render(self: @This(), str: []const u8) void {
         invokeUnwrap(self, "render", .{str}) catch {};
     }
 
-    pub inline fn renderf(
+    pub fn renderf(
         self: @This(),
         allocator: Allocator,
         comptime fmt: []const u8,
@@ -383,8 +398,8 @@ const CommentElem = struct {
         };
     }
 
-    pub inline fn @"<=>"(self: @This(), str: []const u8) void {
-        self.render(str);
+    pub fn @"<=>"(self: @This(), str: []const u8) void {
+        invokeUnwrap(self, "render", .{str}) catch {};
     }
 };
 
@@ -403,23 +418,35 @@ pub const VoidElem = struct {
         invokeUnwrap(self, "render", .{}) catch {};
     }
 
-    pub inline fn @"<>"(self: @This()) void {
+    pub fn @"<>"(self: @This()) void {
         invokeUnwrap(self, "render", .{}) catch {};
     }
 
-    pub inline fn attr(self: @This(), key: anytype, value: []const u8) void {
+    pub fn attr(self: @This(), key: anytype, value: []const u8) void {
         invokeUnwrap(self, "attr", .{ key, value }) catch {};
     }
 
-    pub inline fn attrs(self: @This(), args: anytype) void {
-        invokeUnwrap(self, "attr", .{args}) catch {};
+    pub fn attrs(self: @This(), args: anytype) void {
+        invokeUnwrap(self, "attrs", .{args}) catch {};
     }
 };
 
-fn invokeUnwrap(self: anytype, comptime method_name: []const u8, args: anytype) !void {
+// A helper function for calling elem methods, that
+// in addition to invoking the method, it:
+// - checks if an error already exists, when then it just returns
+// - stores the error returned if any
+//
+// For instance, `invokeUnwrap(elem, "foo", .{x, y})` would be equivalent to:
+//
+//   elem._internal.getLastError() catch return;
+//   elem.foo(x, y) catch |err| {
+//       elem._internal.setError(err);
+//       return err;
+//   }
+inline fn invokeUnwrap(self: anytype, comptime method_name: []const u8, args: anytype) !void {
     const internal = @field(self, "_internal");
     const elem = @field(self, "unwrap");
-    Meta.callMethod(internal.*, "getLastError", .{}) catch return;
+    Meta.callMethod(internal.*, "getError", .{}) catch return;
     Meta.callMethod(elem, method_name, args) catch |err| {
         Meta.callMethod(internal, "setError", .{err});
         return err;
@@ -427,6 +454,8 @@ fn invokeUnwrap(self: anytype, comptime method_name: []const u8, args: anytype) 
 }
 
 const Meta = struct {
+    /// Returns the child of the pointer type, or
+    /// the type as is if not a pointer.
     fn DerefType(T: type) type {
         return switch (@typeInfo(T)) {
             .pointer => |ptr| ptr.child,
@@ -442,13 +471,14 @@ const Meta = struct {
         }
     }
 
-    fn callMethod(
+    /// Similar to @call, but for methods.
+    inline fn callMethod(
         self: anytype,
         comptime method_name: []const u8,
-        args: anytype,
+        method_args: anytype,
     ) MethodReturnType(DerefType(@TypeOf(self)), method_name) {
         const T = DerefType(@TypeOf(self));
-        return @call(.always_inline, @field(T, method_name), .{self} ++ args);
+        return @call(.auto, @field(T, method_name), .{self} ++ method_args);
     }
 };
 

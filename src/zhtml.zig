@@ -200,11 +200,11 @@ pub const Elem = struct {
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
-        const z = self._internal;
         if (builtin.mode == .Debug) {
-            try z.stack.checkMatching(self.tag);
+            try self._internal.stack.checkMatching(self.tag);
         }
 
+        const z = self._internal;
         try z.w.writeAll("</");
         try z.w.writeAll(self.tag);
         try z.w.writeAll(">");
@@ -234,7 +234,7 @@ pub const Elem = struct {
         return self.begin();
     }
 
-    pub fn @"</>"(self: @This()) (Error || WriterError)!void {
+    pub inline fn @"</>"(self: @This()) (Error || WriterError)!void {
         return self.end();
     }
 
@@ -372,7 +372,7 @@ const PendingAttrs = struct {
                 !std.mem.eql(u8, tag, self.tag))
             {
                 std.debug.print(
-                    "can't put <{s}> attributes on <{s}>",
+                    "can't put <{s}> attributes on <{s}>\n",
                     .{ self.tag, tag },
                 );
                 return Error.TagAttrMismatch;

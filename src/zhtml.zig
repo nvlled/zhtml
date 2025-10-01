@@ -12,67 +12,6 @@ const Internal = struct {
     w: *std.Io.Writer,
     stack: TagStack,
     pending_attrs: PendingAttrs,
-    allocator: Allocator,
-
-    last_error: ?struct {
-        value: anyerror,
-        trace: []const u8,
-    } = null,
-
-    pub inline fn setError(self: *@This(), err: anytype) void {
-        const Self = @This();
-
-        const _setError = struct {
-            inline fn _(internal: *Self, err2: anytype) !void {
-                const trace = if (builtin.mode != .Debug) &.{} else blk: {
-                    if (internal.last_error) |existing_err| {
-                        internal.allocator.free(existing_err.trace);
-                    }
-
-                    var buf: std.io.Writer.Allocating = .init(internal.allocator);
-                    const info = try std.debug.getSelfDebugInfo();
-                    try std.debug.writeCurrentStackTrace(
-                        &buf.writer,
-                        info,
-                        .detect(std.fs.File.stderr()),
-                        @returnAddress(),
-                    );
-
-                    try buf.writer.flush();
-
-                    const trace = try buf.toOwnedSlice();
-                    break :blk trace;
-                };
-
-                internal.last_error = .{
-                    .value = err2,
-                    .trace = trace,
-                };
-            }
-        }._;
-
-        _setError(self, err) catch |inner_err| {
-            @panic(@errorName(inner_err));
-        };
-    }
-
-    pub fn getLastError(self: @This()) !void {
-        if (self.last_error) |err| {
-            return err.value;
-        }
-    }
-
-    pub fn getLastErrorTrace(self: @This()) ?[]const u8 {
-        if (self.last_error) |err| {
-            return err.trace;
-        }
-    }
-
-    pub fn printLastErrorTrace(self: @This()) ?[]const u8 {
-        if (self.last_error) |err| {
-            std.debug.print("{s}\n", .{err.trace});
-        }
-    }
 };
 
 // All elem fields will be initialized with
@@ -82,8 +21,6 @@ const Internal = struct {
 //
 // It also keeps the public API clean and tidy.
 _internal: *Internal,
-
-notry: @import("./zhtml-notry.zig"),
 
 html: Elem,
 head: Elem,
@@ -168,10 +105,7 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
         .w = w,
         .stack = .{ .allocator = allocator },
         .pending_attrs = .{},
-        .allocator = allocator,
     };
-
-    self.notry = try .initFrom(&self);
 
     inline for (std.meta.fields(Zhtml)) |field| {
         switch (field.type) {
@@ -199,8 +133,6 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
 
 pub fn deinit(self: Zhtml, allocator: Allocator) void {
     self._internal.stack.items.deinit(allocator);
-    if (self._internal.last_error) |err|
-        allocator.free(err.trace);
     allocator.destroy(self._internal);
 }
 
@@ -697,46 +629,6 @@ test "formatting and printing" {
         try z.write("\n");
     }
     try div.@"</>"();
-
-    const output = try buf.toOwnedSlice();
-    defer allocator.free(output);
-
-    try std.testing.expectEqualStrings(expected, output);
-}
-
-test "formatting and printing (notry)" {
-    const expected =
-        \\<div class="foo-123">
-        \\<div>1 2 3</div>
-        \\<div>4 5 6</div>
-        \\</div>
-    ;
-
-    const allocator = std.testing.allocator;
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-
-    const zhtml: Zhtml = try .init(&buf.writer, allocator);
-    defer zhtml.deinit(allocator);
-
-    const z = zhtml.notry;
-
-    var fmt: Formatter = .init(allocator);
-    defer fmt.deinit();
-
-    const div = z.div;
-
-    div.attr(.class, try fmt.string("foo-{d}", .{123}));
-    div.@"<>"();
-    {
-        try z.print(allocator, "{s}", .{"\n"});
-        try z.div.renderf(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
-
-        z.write("\n");
-        div.@"<=>"(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
-        z.write("\n");
-    }
-    div.@"</>"();
 
     const output = try buf.toOwnedSlice();
     defer allocator.free(output);

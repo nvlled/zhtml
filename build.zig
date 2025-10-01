@@ -26,8 +26,7 @@ pub fn build(b: *std.Build) void {
     // Zig modules are the preferred way of making Zig code available to consumers.
     // addModule defines a module that we intend to make available for importing
     // to our consumers. We must give it a name because a Zig package can expose
-    // multiple modules and consumers will need to be able to specify which
-    // module they want to access.
+    // multiple modules and consumers will need to be able to specify which // module they want to access.
     const mod = b.addModule("zhtml", .{
         // The root source file is the "entry point" of this module. Users of
         // this module will only be able to access public declarations contained
@@ -35,7 +34,7 @@ pub fn build(b: *std.Build) void {
         // intend to expose to consumers that were defined in other files part
         // of this module, you will have to make sure to re-export them from
         // the root file.
-        .root_source_file = b.path("src/zhtml.zig"),
+        .root_source_file = b.path("src/zhtml-wrapped.zig"),
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,

@@ -137,11 +137,11 @@ pub fn deinit(self: Zhtml, allocator: Allocator) void {
 }
 
 pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
-    return self._internal.pending_attrs.add(key, value);
+    return self._internal.pending_attrs.add(null, key, value);
 }
 
 pub fn attrs(self: @This(), args: anytype) Error!void {
-    return self._internal.pending_attrs.addMany(args);
+    return self._internal.pending_attrs.addMany(null, args);
 }
 
 pub inline fn write(self: @This(), str: []const u8) WriterError!void {
@@ -246,13 +246,11 @@ pub const Elem = struct {
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
-        self._internal.pending_attrs.tag = self.tag;
-        return self._internal.pending_attrs.add(key, value);
+        return self._internal.pending_attrs.add(self.tag, key, value);
     }
 
     pub fn attrs(self: @This(), args: anytype) Error!void {
-        self._internal.pending_attrs.tag = self.tag;
-        return self._internal.pending_attrs.addMany(args);
+        return self._internal.pending_attrs.addMany(self.tag, args);
     }
 };
 
@@ -330,13 +328,15 @@ pub const VoidElem = struct {
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
-        self._internal.pending_attrs.tag = self.tag;
-        return self._internal.pending_attrs.add(key, value);
+        return self._internal.pending_attrs.add(
+            self.tag,
+            key,
+            value,
+        );
     }
 
     pub fn attrs(self: @This(), args: anytype) Error!void {
-        self._internal.pending_attrs.tag = self.tag;
-        return self._internal.pending_attrs.addMany(args);
+        return self._internal.pending_attrs.addMany(self.tag, args);
     }
 };
 
@@ -345,7 +345,19 @@ const PendingAttrs = struct {
     tag: []const u8 = "",
     attrs: [512]struct { []const u8, []const u8 } = undefined,
 
-    fn add(self: *@This(), key_arg: anytype, value: []const u8) Error!void {
+    fn add(self: *@This(), tag: ?[]const u8, key_arg: anytype, value: []const u8) Error!void {
+        if (builtin.mode == .Debug) if (tag) |name| {
+            if (self.tag.len > 0 and !std.mem.eql(u8, name, self.tag)) {
+                std.debug.print(
+                    "can't mix <{s}> and <{s}> attributes\n",
+                    .{ self.tag, name },
+                );
+                return Error.TagAttrMismatch;
+            }
+        };
+
+        self.tag = tag orelse "";
+
         if (self.index >= self.attrs.len) return Error.TooManyAttrs;
         const key = switch (@typeInfo(@TypeOf(key_arg))) {
             .enum_literal => @tagName(key_arg),
@@ -355,9 +367,28 @@ const PendingAttrs = struct {
         self.index += 1;
     }
 
-    fn addMany(self: *@This(), args: anytype) Error!void {
+    fn addMany(self: *@This(), tag: ?[]const u8, args: anytype) Error!void {
+        if (builtin.mode == .Debug) if (tag) |name| {
+            if (self.tag.len > 0 and !std.mem.eql(u8, name, self.tag)) {
+                std.debug.print(
+                    "can't mix <{s}> and <{s}> attributes\n",
+                    .{ self.tag, name },
+                );
+                return Error.TagAttrMismatch;
+            }
+        };
+
+        self.tag = tag orelse "";
+
         inline for (std.meta.fields(@TypeOf(args))) |field| {
-            try self.add(field.name, @field(args, field.name));
+            if (self.index >= self.attrs.len) return Error.TooManyAttrs;
+            const fname = field.name;
+            const key = switch (@typeInfo(@TypeOf(fname))) {
+                .enum_literal => @tagName(fname),
+                else => fname,
+            };
+            self.attrs[self.index] = .{ key, @field(args, field.name) };
+            self.index += 1;
         }
     }
 
@@ -366,11 +397,10 @@ const PendingAttrs = struct {
     }
 
     fn writeAndClear(self: *@This(), tag: []const u8, w: *std.Io.Writer) !void {
-        if (self.index > 0) {
-            if (builtin.mode == .Debug and
-                self.tag.len > 0 and
-                !std.mem.eql(u8, tag, self.tag))
-            {
+        if (self.index == 0) return;
+
+        if (builtin.mode == .Debug) {
+            if (self.tag.len > 0 and !std.mem.eql(u8, tag, self.tag)) {
                 std.debug.print(
                     "can't put <{s}> attributes on <{s}>\n",
                     .{ self.tag, tag },
@@ -386,7 +416,9 @@ const PendingAttrs = struct {
             try w.writeByte('=');
             try writeEscapedAttr(w, value);
         }
+
         self.index = 0;
+        self.tag = "";
     }
 };
 
@@ -674,6 +706,19 @@ test "mismatched tag-attr" {
 
     try z.p.attrs(.{ .c = "2" });
     const err = z.div.@"<>"();
+    try std.testing.expectError(Error.TagAttrMismatch, err);
+}
+
+test "mismatched tag-attr 2" {
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    try z.p.attrs(.{ .c = "2" });
+    const err = z.img.attrs(.{ .x = "2" });
     try std.testing.expectError(Error.TagAttrMismatch, err);
 }
 

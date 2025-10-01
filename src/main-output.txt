@@ -1,0 +1,24 @@
+Example 1 output:
+
+<html><head><title>Example 1</title><meta charset="utf-8"></head><body><h1 id="header">Example 1</h1><p id="para" class="a b c">This is a paragraph/sentence. And here is an image:<img class="border" src="image.png">And some more text here.</p></body></html>
+
+
+Example 2 output:
+
+<html><head><title>Example 2</title><meta charset="utf-8"></head><body><h1 id="Example 2">Page header</h1><p id="para" class="a b c">This is a paragraph/sentence. And here is an image:<img class="border" src="image.png">And some more text here.</p></body></html>
+
+
+Example 3 output:
+
+<div><ul id="evens">
+<li>item no. 0</li>
+<li>item no. 2</li>
+<li>item no. 4</li>
+<li>item no. 6</li>
+<li>item no. 8</li>
+<li>item no. 10</li>
+<li>item no. 12</li>
+<li>item no. 14</li>
+<li>item no. 16</li>
+<li>item no. 18</li>
+</ul></div>

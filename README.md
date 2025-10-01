@@ -7,7 +7,7 @@ The templating language uses ordinary zig code:
 
 ```zig
 h1.attr(.id, "id");
-if (falseCond)
+if (addFoo())
   h1.attr(.class, "foo");
 h1.render("heading");
 
@@ -18,7 +18,7 @@ h2.@"</>"();
 ul.begin();
 for (0..5) |i| {
     if (i % 2 == 0) {
-      li.print(allocator, "item {d}", .{i});
+      try li.renderf(allocator, "item {d}", .{i});
     }
 }
 ul.end();
@@ -32,6 +32,8 @@ ul.end();
 //   <li>item 4</li>
 // </ul>
 ```
+
+See [src/main.zig](src/main.zig) for a complete runnable example.
 
 Depending on one's taste, this may or may look horribly verbose,
 or criminally procedural for a declarative markup.

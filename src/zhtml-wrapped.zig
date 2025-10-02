@@ -362,13 +362,18 @@ pub const Elem = struct {
     pub fn attrs(self: @This(), args: anytype) void {
         invokeUnwrap(self, "attrs", .{args}) catch {};
     }
+
+    pub fn withAttr(self: @This(), key: anytype, value: []const u8) @This() {
+        invokeUnwrap(self, "attr", .{ key, value }) catch {};
+        return self;
+    }
 };
 
 const CommentElem = struct {
     unwrap: Zhtml.CommentElem,
     _internal: *Internal,
 
-    pub fn begin_(self: @This()) void {
+    pub fn begin(self: @This()) void {
         invokeUnwrap(self, "begin", .{}) catch {};
     }
 
@@ -428,6 +433,11 @@ pub const VoidElem = struct {
 
     pub fn attrs(self: @This(), args: anytype) void {
         invokeUnwrap(self, "attrs", .{args}) catch {};
+    }
+
+    pub fn withAttr(self: @This(), key: anytype, value: []const u8) @This() {
+        invokeUnwrap(self, "attr", .{ key, value }) catch {};
+        return self;
     }
 };
 
@@ -643,6 +653,79 @@ test "last error" {
     z.div.@"<>"();
     z.p.@"</>"();
     try std.testing.expectError(Zhtml.Error.ClosingTagMismatch, z.getError());
+}
+
+test "comprehensive" {
+    const expected =
+        \\&lt;p&gt;this is escaped&lt;/p&gt;
+        \\<p>this is not escaped</p>
+        \\&lt;p&gt;this is not escapedddd&lt;/p&gt;
+        \\<p>this is not escapedddd</p>
+        \\<div x="1" y="2" z="3" w="4" v="5" v="6\"\'">div with silly attributes</div>
+        \\<div id="6" class="div-color">div with normal attributes</div><div>
+        \\<img src="image1.png"><img src="image2.png"><br>
+        \\<p>a paragraph, a barely one, actually a just sentence</p></div>
+        \\<!--a comment-->
+        \\<!--another comment-->
+        \\<!--
+        \\more comment
+        \\-->
+    ;
+
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: @This() = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    z.write("<p>this is escaped</p>\n");
+    z.@"writeUnsafe!?"("<p>this is not escaped</p>\n");
+    try z.print(allocator, "<p>this is not escape{s}</p>\n", .{"dddd"});
+    try z.@"printUnsafe!?"(allocator, "<p>this is not escape{s}</p>\n", .{"dddd"});
+
+    z.attr(.x, "1");
+    z.attr("y", "2");
+    z.attrs(.{ .z = "3", .w = "4" });
+    z.div.attr(.v, "5");
+    z.div.attr(.v, "6\"'");
+    z.div.render("div with silly attributes");
+
+    z.write("\n");
+    z.div.attr(.id, "6");
+    try z.div
+        .withAttr(.class, "div-color")
+        .renderf(allocator, "div with {s} attributes", .{"normal"});
+
+    z.div.@"<>"();
+    {
+        z.write("\n");
+        z.img.withAttr(.src, "image1.png").render();
+        z.img.attr(.src, "image2.png");
+        z.img.@"<>"();
+        z.br.@"<>"();
+        z.write("\n");
+        z.p.begin();
+        z.write("a paragraph, a barely one, actually a just sentence");
+        z.p.end();
+    }
+    z.div.@"</>"();
+
+    z.write("\n");
+    z.comment.render("a comment");
+    z.write("\n");
+
+    try z.comment.renderf(allocator, "{s} comment", .{"another"});
+    z.write("\n");
+
+    z.comment.begin();
+    z.write("\nmore comment\n");
+    z.comment.end();
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(expected, output);
 }
 
 test {

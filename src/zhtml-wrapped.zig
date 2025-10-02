@@ -355,6 +355,24 @@ pub const Elem = struct {
         invokeUnwrap(self, "attr", .{ key, value }) catch {};
     }
 
+    pub fn attrf(
+        self: @This(),
+        arena: Allocator,
+        key: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) Allocator.Error!void {
+        invokeUnwrap(self, "attrf", .{ arena, key, fmt, fmt_args }) catch |err| {
+            switch (err) {
+                Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+                Zhtml.Error.ClosingTagMismatch,
+                Zhtml.Error.TagAttrMismatch,
+                Zhtml.Error.TooManyAttrs,
+                => self._internal.setError(err),
+            }
+        };
+    }
+
     pub fn attrs(self: @This(), args: anytype) void {
         invokeUnwrap(self, "attrs", .{args}) catch {};
     }
@@ -421,6 +439,24 @@ pub const VoidElem = struct {
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) void {
         invokeUnwrap(self, "attr", .{ key, value }) catch {};
+    }
+
+    pub fn attrf(
+        self: @This(),
+        arena: Allocator,
+        key: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) Allocator.Error!void {
+        invokeUnwrap(self, "attrf", .{ arena, key, fmt, fmt_args }) catch |err| {
+            switch (err) {
+                Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+                Zhtml.Error.ClosingTagMismatch,
+                Zhtml.Error.TagAttrMismatch,
+                Zhtml.Error.TooManyAttrs,
+                => self._internal.setError(err),
+            }
+        };
     }
 
     pub fn attrs(self: @This(), args: anytype) void {
@@ -508,13 +544,13 @@ test "comprehensive" {
         \\<p>this is not escaped</p>
         \\&lt;p&gt;this is not escapedddd&lt;/p&gt;
         \\<p>this is not escapedddd</p>
-        \\<div x="1" y="2" z="3" w="4" v="5" v="6\"\'">div with silly attributes</div>
+        \\<div x="1" y="2" z="3" w="4" v="5" v="6\"\'" q="11-22">div with silly attributes</div>
         \\
         \\<div id="6" class="div-color">div with normal attributes</div>
         \\
         \\<div>
         \\  <img src="image1.png">
-        \\  <img src="image2.png">
+        \\  <img class="aa bb" src="image2.png">
         \\  <br>
         \\  <p>
         \\    a paragraph, a barely one, actually a just sentence
@@ -528,7 +564,10 @@ test "comprehensive" {
         \\
     ;
 
-    const allocator = std.testing.allocator;
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
@@ -545,6 +584,7 @@ test "comprehensive" {
     z.attrs(.{ .z = "3", .w = "4" });
     z.div.attr(.v, "5");
     z.div.attr(.v, "6\"'");
+    try z.div.attrf(allocator, .q, "{d}-{d}", .{ 11, 22 });
     z.div.render("div with silly attributes");
     z.write("\n");
 
@@ -557,6 +597,7 @@ test "comprehensive" {
     z.div.@"<>"();
     {
         z.img.withAttr(.src, "image1.png").render();
+        try z.img.attrf(allocator, .class, "{s} {s}", .{ "aa", "bb" });
         z.img.attr(.src, "image2.png");
         z.img.@"<>"();
         z.br.@"<>"();

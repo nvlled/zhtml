@@ -297,14 +297,18 @@ pub const Elem = struct {
         return self.end();
     }
 
-    pub fn @"<=>"(
-        self: @This(),
-        str: []const u8,
-    ) (Error || WriterError)!void {
-        return self.render(str);
+    pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
+        return self._internal.pending_attrs.add(self.tag, key, value);
     }
 
-    pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
+    pub fn attrf(
+        self: @This(),
+        arena: Allocator,
+        key: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) (AllocatorError || Error)!void {
+        const value = try std.fmt.allocPrint(arena, fmt, fmt_args);
         return self._internal.pending_attrs.add(self.tag, key, value);
     }
 
@@ -389,6 +393,17 @@ pub const VoidElem = struct {
             key,
             value,
         );
+    }
+
+    pub fn attrf(
+        self: @This(),
+        arena: Allocator,
+        key: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) (AllocatorError || Error)!void {
+        const value = try std.fmt.allocPrint(arena, fmt, fmt_args);
+        return self._internal.pending_attrs.add(self.tag, key, value);
     }
 
     pub fn attrs(self: @This(), args: anytype) Error!void {

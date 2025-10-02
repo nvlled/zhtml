@@ -351,10 +351,6 @@ pub const Elem = struct {
         invokeUnwrap(self, "end", .{}) catch {};
     }
 
-    pub fn @"<=>"(self: @This(), str: []const u8) void {
-        invokeUnwrap(self, "render", .{str}) catch {};
-    }
-
     pub fn attr(self: @This(), key: anytype, value: []const u8) void {
         invokeUnwrap(self, "attr", .{ key, value }) catch {};
     }
@@ -401,10 +397,6 @@ const CommentElem = struct {
                 => self._internal.setError(err),
             }
         };
-    }
-
-    pub fn @"<=>"(self: @This(), str: []const u8) void {
-        invokeUnwrap(self, "render", .{str}) catch {};
     }
 };
 

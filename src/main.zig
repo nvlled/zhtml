@@ -19,14 +19,14 @@ pub fn example1(allocator: std.mem.Allocator) !void {
     {
         z.head.@"<>"();
         {
-            z.title.@"<=>"("Example 1");
-            z.meta.withAttr(.charset, "utf-8").@"<=>"();
+            z.title.render("Example 1");
+            z.meta.withAttr(.charset, "utf-8").render();
         }
         z.head.@"</>"();
 
         z.body.@"<>"();
         {
-            z.h1.withAttr(.id, "header").@"<=>"("Example 1");
+            z.h1.withAttr(.id, "header").render("Example 1");
 
             z.p.attr(.id, "para");
             z.p.attr(.class, "a b c");

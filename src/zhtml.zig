@@ -13,7 +13,7 @@ const Internal = struct {
     stack: TagStack,
     pending_attrs: PendingAttrs,
 
-    depth: usize = 0,
+    depth: i16 = 0,
     last_written: u8 = 0,
 
     inline fn writeByte(self: *@This(), ch: u8) !void {
@@ -33,11 +33,11 @@ const Internal = struct {
         if (builtin.mode == .Debug) {
             if (self.last_written != '\n' and self.last_written != 0) {
                 try self.w.writeByte('\n');
-                for (0..self.depth) |_|
+                for (0..@intCast(self.depth)) |_|
                     try self.w.writeAll("  ");
                 self.last_written = ' ';
             } else if (self.last_written == '\n') {
-                for (0..self.depth) |_|
+                for (0..@intCast(self.depth)) |_|
                     try self.w.writeAll("  ");
                 self.last_written = ' ';
             }
@@ -530,11 +530,20 @@ const TagStack = struct {
     }
 
     pub fn checkMatching(self: *@This(), expected: []const u8) Error!void {
-        const tag = self.pop();
-        if (tag == null or !std.mem.eql(u8, tag.?, expected)) {
+        if (self.pop()) |tag| {
+            if (!std.mem.eql(u8, tag, expected)) {
+                std.debug.print(
+                    "\ncan't close tag <{s}> : <{s}> is still open\n",
+                    .{ expected, tag },
+                );
+                return Error.ClosingTagMismatch;
+            }
+        } else {
             std.debug.print(
-                "\ncan't close tag <{s}> : <{s}> is still open\n",
-                .{ expected, if (tag) |s| s else "null" },
+                "\ncan't close tag <{s}> : no previous tag was opened\n",
+                .{
+                    expected,
+                },
             );
             return Error.ClosingTagMismatch;
         }
@@ -761,7 +770,7 @@ test "mismatched tag-attr" {
     try std.testing.expectError(Error.TagAttrMismatch, err);
 }
 
-test "mismatched tag-attr 2" {
+test "invalid closing tag" {
     const allocator = std.testing.allocator;
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
@@ -769,9 +778,8 @@ test "mismatched tag-attr 2" {
     const z: Zhtml = try .init(&buf.writer, allocator);
     defer z.deinit(allocator);
 
-    try z.p.attrs(.{ .c = "2" });
-    const err = z.img.attrs(.{ .x = "2" });
-    try std.testing.expectError(Error.TagAttrMismatch, err);
+    const err = z.div.@"</>"();
+    try std.testing.expectError(Error.ClosingTagMismatch, err);
 }
 
 test {

@@ -361,13 +361,6 @@ pub const CommentElem = struct {
         defer allocator.free(str);
         try self.render(str);
     }
-
-    pub fn @"<=>"(
-        self: @This(),
-        str: []const u8,
-    ) (Error || WriterError)!void {
-        return self.render(str);
-    }
 };
 
 pub const VoidElem = struct {
@@ -388,10 +381,6 @@ pub const VoidElem = struct {
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
         try z.writeAll(">\n");
-    }
-
-    pub inline fn @"<>"(self: @This()) (Error || WriterError)!void {
-        return self.render();
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
@@ -716,7 +705,7 @@ test "formatting and printing" {
     try div.@"<>"();
     {
         try z.div.renderf(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
-        try div.@"<=>"(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
+        try div.render(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
     }
     try div.@"</>"();
 
@@ -747,7 +736,7 @@ test "pending attrs" {
     {
         try z.img.attr(.id, "im");
         try z.img.attr(.src, "/");
-        try z.img.@"<>"();
+        try z.img.render();
     }
     try z.div.@"</>"();
 

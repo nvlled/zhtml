@@ -64,16 +64,16 @@ pub fn example2(allocator: std.mem.Allocator) !void {
     {
         try z.head.@"<>"();
         {
-            try z.title.@"<=>"("Example 2");
+            try z.title.render("Example 2");
             try z.meta.attr(.charset, "utf-8");
-            try z.meta.@"<>"();
+            try z.meta.render();
         }
         try z.head.@"</>"();
 
         try z.body.@"<>"();
         {
             try z.h1.attr(.id, "Example 2");
-            try z.h1.@"<=>"("Page header");
+            try z.h1.render("Page header");
 
             try z.p.attr(.id, "para");
             try z.p.attr(.class, "a b c");
@@ -81,7 +81,7 @@ pub fn example2(allocator: std.mem.Allocator) !void {
             {
                 try z.write("This is a paragraph/sentence. And here is an image:");
                 try z.img.attrs(.{ .class = "border", .src = "image.png" });
-                try z.img.@"<>"();
+                try z.img.render();
                 try z.write("And some more text here.");
             }
             try z.p.@"</>"();

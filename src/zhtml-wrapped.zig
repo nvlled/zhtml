@@ -484,151 +484,6 @@ const Meta = struct {
     }
 };
 
-test {
-    const expected =
-        \\<html><!--some comment here--><head><title>page title</title><meta charset="utf-8"><style>
-        \\body { background: red }
-        \\h1 { color: blue }</style></head><body><h1>heading</h1><h1 id="test">heading with id test</h1><p>This is a sentence 1.
-        \\ This is a sentence 2.</p></body></html>
-    ;
-
-    const allocator = std.testing.allocator;
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-
-    const z: @This() = if (builtin.mode == .Debug)
-        try .init(&buf.writer, allocator)
-    else
-        .init(&buf.writer, allocator);
-
-    defer z.deinit(allocator);
-
-    z.html.begin();
-    {
-        z.comment.render("some comment here");
-        z.head.begin();
-        {
-            z.title.render("page title");
-            z.meta.attr(.charset, "utf-8");
-            z.meta.render();
-            z.style.begin();
-            {
-                z.@"writeUnsafe!?"(
-                    \\
-                    \\body { background: red }
-                    \\h1 { color: blue }
-                );
-            }
-            z.style.end();
-        }
-        z.head.end();
-
-        z.body.begin();
-        {
-            z.h1.render("heading");
-
-            z.h1.attr(.id, "test");
-            z.h1.render("heading with id test");
-
-            z.p.render(
-                \\This is a sentence 1.
-                \\ This is a sentence 2.
-            );
-        }
-        z.body.end();
-    }
-    z.html.end();
-
-    const output = try buf.toOwnedSlice();
-    defer allocator.free(output);
-
-    try std.testing.expectEqualStrings(expected, output);
-}
-
-test {
-    const expected =
-        \\<h1 id="id">heading</h1>
-        \\<h2>subheading</h2>
-        \\<ul>
-        \\  <li>item 0</li>
-        \\  <li>item 2</li>
-        \\  <li>item 4</li>
-        \\  <li>item 6</li>
-        \\  <li>item 8</li>
-        \\</ul>
-    ;
-
-    const allocator = std.testing.allocator;
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-
-    const z: @This() = try .init(&buf.writer, allocator);
-    defer z.deinit(allocator);
-
-    const h1 = z.h1;
-    const h2 = z.h2;
-    const ul = z.ul;
-    const li = z.li;
-
-    {
-        h1.attr(.id, "id");
-        h1.render("heading");
-
-        z.write("\n");
-        h2.render("subheading");
-        z.write("\n");
-        ul.begin();
-        z.write("\n");
-        for (0..10) |i| {
-            if (i % 2 != 0) continue;
-            z.write("  ");
-            li.begin();
-            try z.print(allocator, "item {d}", .{i});
-            li.end();
-            z.write("\n");
-        }
-        ul.end();
-    }
-
-    const output = try buf.toOwnedSlice();
-    defer allocator.free(output);
-
-    try std.testing.expectEqualStrings(expected, output);
-}
-
-test "pending attrs" {
-    const expected =
-        \\<div a="1" c="2"><img id="im" src="/"></div>
-        \\<span></span><!---->
-    ;
-
-    const allocator = std.testing.allocator;
-    var buf: std.Io.Writer.Allocating = .init(allocator);
-    defer buf.deinit();
-
-    const z: @This() = try .init(&buf.writer, allocator);
-    defer z.deinit(allocator);
-
-    z.div.attr(.a, "1");
-    z.div.attrs(.{ .c = "2" });
-    z.div.@"<>"();
-    {
-        z.img.attr(.id, "im");
-        z.img.attr(.src, "/");
-        z.img.@"<>"();
-    }
-    z.div.@"</>"();
-
-    z.write("\n");
-    try z.span.renderf(allocator, "", .{});
-    try z.comment.renderf(allocator, "", .{});
-
-    const output = try buf.toOwnedSlice();
-    defer allocator.free(output);
-
-    try std.testing.expectEqualStrings(expected, output);
-}
-
 test "last error" {
     const allocator = std.testing.allocator;
     var buf: std.Io.Writer.Allocating = .init(allocator);
@@ -654,14 +509,23 @@ test "comprehensive" {
         \\&lt;p&gt;this is not escapedddd&lt;/p&gt;
         \\<p>this is not escapedddd</p>
         \\<div x="1" y="2" z="3" w="4" v="5" v="6\"\'">div with silly attributes</div>
-        \\<div id="6" class="div-color">div with normal attributes</div><div>
-        \\<img src="image1.png"><img src="image2.png"><br>
-        \\<p>a paragraph, a barely one, actually a just sentence</p></div>
+        \\
+        \\<div id="6" class="div-color">div with normal attributes</div>
+        \\
+        \\<div>
+        \\  <img src="image1.png">
+        \\  <img src="image2.png">
+        \\  <br>
+        \\  <p>
+        \\    a paragraph, a barely one, actually a just sentence
+        \\  </p>
+        \\</div>
         \\<!--a comment-->
         \\<!--another comment-->
         \\<!--
         \\more comment
         \\-->
+        \\
     ;
 
     const allocator = std.testing.allocator;
@@ -682,36 +546,32 @@ test "comprehensive" {
     z.div.attr(.v, "5");
     z.div.attr(.v, "6\"'");
     z.div.render("div with silly attributes");
-
     z.write("\n");
+
     z.div.attr(.id, "6");
     try z.div
         .withAttr(.class, "div-color")
         .renderf(allocator, "div with {s} attributes", .{"normal"});
+    z.write("\n");
 
     z.div.@"<>"();
     {
-        z.write("\n");
         z.img.withAttr(.src, "image1.png").render();
         z.img.attr(.src, "image2.png");
         z.img.@"<>"();
         z.br.@"<>"();
-        z.write("\n");
         z.p.begin();
         z.write("a paragraph, a barely one, actually a just sentence");
         z.p.end();
     }
     z.div.@"</>"();
 
-    z.write("\n");
     z.comment.render("a comment");
-    z.write("\n");
 
     try z.comment.renderf(allocator, "{s} comment", .{"another"});
-    z.write("\n");
 
     z.comment.begin();
-    z.write("\nmore comment\n");
+    z.write("more comment");
     z.comment.end();
 
     const output = try buf.toOwnedSlice();

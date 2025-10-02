@@ -12,6 +12,52 @@ const Internal = struct {
     w: *std.Io.Writer,
     stack: TagStack,
     pending_attrs: PendingAttrs,
+
+    depth: usize = 0,
+    last_written: u8 = 0,
+
+    inline fn writeByte(self: *@This(), ch: u8) !void {
+        try self.w.writeByte(ch);
+        if (builtin.mode == .Debug) {
+            self.last_written = ch;
+        }
+    }
+    inline fn writeAll(self: *@This(), str: []const u8) !void {
+        try self.w.writeAll(str);
+        if (builtin.mode == .Debug) {
+            if (str.len > 0) self.last_written = str[str.len - 1];
+        }
+    }
+
+    inline fn writeIndent(self: *@This()) !void {
+        if (builtin.mode == .Debug) {
+            if (self.last_written != '\n' and self.last_written != 0) {
+                try self.w.writeByte('\n');
+                for (0..self.depth) |_|
+                    try self.w.writeAll("  ");
+                self.last_written = ' ';
+            } else if (self.last_written == '\n') {
+                for (0..self.depth) |_|
+                    try self.w.writeAll("  ");
+                self.last_written = ' ';
+            }
+        }
+    }
+
+    inline fn writeEscapedContent(self: *@This(), str: []const u8) WriterError!void {
+        const w = self.w;
+        for (str) |ch| {
+            switch (ch) {
+                '<' => try w.writeAll("&lt;"),
+                '>' => try w.writeAll("&gt;"),
+                '&' => try w.writeAll("&amp;"),
+                else => try w.writeByte(ch),
+            }
+        }
+        if (builtin.mode == .Debug) {
+            if (str.len > 0) self.last_written = str[str.len - 1];
+        }
+    }
 };
 
 // All elem fields will be initialized with
@@ -145,11 +191,12 @@ pub fn attrs(self: @This(), args: anytype) Error!void {
 }
 
 pub inline fn write(self: @This(), str: []const u8) WriterError!void {
-    return writeEscapedContent(self._internal.w, str);
+    try self._internal.writeIndent();
+    try self._internal.writeEscapedContent(str);
 }
 
 pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) WriterError!void {
-    return self._internal.w.writeAll(str);
+    return self._internal.writeAll(str);
 }
 
 pub fn print(
@@ -161,7 +208,8 @@ pub fn print(
     const str = try std.fmt.allocPrint(gpa, fmt, args);
     defer gpa.free(str);
 
-    try writeEscapedContent(self._internal.w, str);
+    try self._internal.writeIndent();
+    try self._internal.writeEscapedContent(str);
 }
 
 pub fn @"printUnsafe!?"(
@@ -173,7 +221,8 @@ pub fn @"printUnsafe!?"(
     const str = try std.fmt.allocPrint(gpa, fmt, args);
     defer gpa.free(str);
 
-    try self._internal.w.writeAll(str);
+    try self._internal.writeIndent();
+    try self._internal.writeAll(str);
 }
 
 pub const Elem = struct {
@@ -192,11 +241,12 @@ pub const Elem = struct {
         if (builtin.mode == .Debug) {
             z.stack.push(self.tag);
         }
-
-        try z.w.writeAll("<");
-        try z.w.writeAll(self.tag);
+        try z.writeIndent();
+        try z.writeAll("<");
+        try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
-        try z.w.writeAll(">");
+        try z.writeAll(">\n");
+        z.depth += 1;
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
@@ -205,18 +255,27 @@ pub const Elem = struct {
         }
 
         const z = self._internal;
-        try z.w.writeAll("</");
-        try z.w.writeAll(self.tag);
-        try z.w.writeAll(">");
+        z.depth -= 1;
+        try z.writeIndent();
+        try z.writeAll("</");
+        try z.writeAll(self.tag);
+        try z.writeAll(">\n");
     }
 
     pub fn render(
         self: @This(),
         str: []const u8,
     ) (Error || WriterError)!void {
-        try self.begin();
-        try writeEscapedContent(self._internal.w, str);
-        try self.end();
+        const z = self._internal;
+        try z.writeIndent();
+        try z.writeAll("<");
+        try z.writeAll(self.tag);
+        try z.pending_attrs.writeAndClear(self.tag, z.w);
+        try z.writeAll(">");
+        try z.writeEscapedContent(str);
+        try z.writeAll("</");
+        try z.writeAll(self.tag);
+        try z.writeAll(">\n");
     }
 
     pub fn renderf(
@@ -267,7 +326,10 @@ pub const CommentElem = struct {
         if (builtin.mode == .Debug) {
             self._internal.stack.push("!----");
         }
-        try self._internal.w.writeAll("<!--");
+
+        const z = self._internal;
+        try z.writeIndent();
+        try z.writeAll("<!--\n");
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
@@ -275,14 +337,18 @@ pub const CommentElem = struct {
             try self._internal.stack.checkMatching("!----");
         }
 
-        try self._internal.w.writeAll("-->");
+        const z = self._internal;
+        try z.writeIndent();
+        try z.writeAll("-->\n");
     }
 
     pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
-        self._internal.pending_attrs.clear();
-        try self.begin();
-        try writeEscapedContent(self._internal.w, str);
-        try self.end();
+        const z = self._internal;
+        z.pending_attrs.clear();
+        try z.writeIndent();
+        try z.writeAll("<!--");
+        try z.writeEscapedContent(str);
+        try z.writeAll("-->\n");
     }
 
     pub fn renderf(
@@ -317,10 +383,11 @@ pub const VoidElem = struct {
 
     pub fn render(self: @This()) (Error || WriterError)!void {
         const z = self._internal;
-        try z.w.writeAll("<");
-        try z.w.writeAll(self.tag);
+        try z.writeIndent();
+        try z.writeAll("<");
+        try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
-        try z.w.writeAll(">");
+        try z.writeAll(">\n");
     }
 
     pub inline fn @"<>"(self: @This()) (Error || WriterError)!void {
@@ -474,24 +541,6 @@ const TagStack = struct {
     }
 };
 
-inline fn writeAttributes(w: *std.Io.Writer, args: anytype) WriterError!void {
-    inline for (std.meta.fields(@TypeOf(args))) |field| {
-        try w.print(" {s}=", .{field.name});
-        try writeEscapedAttr(w, @field(args, field.name));
-    }
-}
-
-fn writeEscapedContent(w: *std.Io.Writer, str: []const u8) WriterError!void {
-    for (str) |ch| {
-        switch (ch) {
-            '<' => try w.writeAll("&lt;"),
-            '>' => try w.writeAll("&gt;"),
-            '&' => try w.writeAll("&amp;"),
-            else => try w.writeByte(ch),
-        }
-    }
-}
-
 fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) WriterError!void {
     try w.writeByte('"');
     for (str) |ch| {
@@ -520,21 +569,31 @@ test "matching mismatch closing tag" {
 
 test {
     const expected =
-        \\<html><!--some comment here--><head><title>page title</title><meta charset="utf-8"><style>
+        \\<html>
+        \\  <!--some comment here-->
+        \\  <head>
+        \\    <title>page title</title>
+        \\    <meta charset="utf-8">
+        \\    <style>
         \\body { background: red }
-        \\h1 { color: blue }</style></head><body><h1>heading</h1><h1 id="test">heading with id test</h1><p>This is a sentence 1.
-        \\ This is a sentence 2.</p></body></html>
+        \\h1 { color: blue }
+        \\    </style>
+        \\  </head>
+        \\  <body>
+        \\    <h1>heading</h1>
+        \\    <h1 id="test">heading with id test</h1>
+        \\    <p>This is a sentence 1.
+        \\ This is a sentence 2.</p>
+        \\  </body>
+        \\</html>
+        \\
     ;
 
     const allocator = std.testing.allocator;
     var buf: std.Io.Writer.Allocating = .init(allocator);
     defer buf.deinit();
 
-    const z: Zhtml = if (builtin.mode == .Debug)
-        try .init(&buf.writer, allocator)
-    else
-        .init(&buf.writer, allocator);
-
+    const z: Zhtml = try .init(&buf.writer, allocator);
     defer z.deinit(allocator);
 
     try z.html.begin();
@@ -548,7 +607,6 @@ test {
             try z.style.begin();
             {
                 try z.@"writeUnsafe!?"(
-                    \\
                     \\body { background: red }
                     \\h1 { color: blue }
                 );
@@ -590,6 +648,7 @@ test {
         \\  <li>item 6</li>
         \\  <li>item 8</li>
         \\</ul>
+        \\
     ;
 
     const allocator = std.testing.allocator;
@@ -608,18 +667,11 @@ test {
         try h1.attr(.id, "id");
         try h1.render("heading");
 
-        try z.write("\n");
         try h2.render("subheading");
-        try z.write("\n");
         try ul.begin();
-        try z.write("\n");
         for (0..10) |i| {
             if (i % 2 != 0) continue;
-            try z.write("  ");
-            try li.begin();
-            try z.print(allocator, "item {d}", .{i});
-            try li.end();
-            try z.write("\n");
+            try li.renderf(allocator, "item {d}", .{i});
         }
         try ul.end();
     }
@@ -633,9 +685,10 @@ test {
 test "formatting and printing" {
     const expected =
         \\<div class="foo-123">
-        \\<div>1 2 3</div>
-        \\<div>4 5 6</div>
+        \\  <div>1 2 3</div>
+        \\  <div>4 5 6</div>
         \\</div>
+        \\
     ;
 
     const allocator = std.testing.allocator;
@@ -653,12 +706,8 @@ test "formatting and printing" {
     try div.attr(.class, try fmt.string("foo-{d}", .{123}));
     try div.@"<>"();
     {
-        try z.print(allocator, "{s}", .{"\n"});
         try z.div.renderf(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
-
-        try z.write("\n");
         try div.@"<=>"(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
-        try z.write("\n");
     }
     try div.@"</>"();
 
@@ -670,7 +719,10 @@ test "formatting and printing" {
 
 test "pending attrs" {
     const expected =
-        \\<div a="1" c="2"><img id="im" src="/"></div>
+        \\<div a="1" c="2">
+        \\  <img id="im" src="/">
+        \\</div>
+        \\
     ;
 
     const allocator = std.testing.allocator;

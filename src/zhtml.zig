@@ -556,13 +556,15 @@ const TagStack = struct {
 
 fn writeEscapedAttr(w: *std.Io.Writer, str: []const u8) WriterError!void {
     try w.writeByte('"');
-    for (str) |ch| {
-        switch (ch) {
-            '\'' => try w.writeAll("\\'"),
-            '"' => try w.writeAll("\\\""),
-            else => try w.writeByte(ch),
-        }
+    var pos: usize = 0;
+
+    while (true) {
+        const i = std.mem.indexOfScalarPos(u8, str, pos, '"') orelse break;
+        try w.writeAll(str[pos..i]);
+        try w.writeAll("&quot;");
+        pos = i + 1;
     }
+    try w.writeAll(str[pos..]);
     try w.writeByte('"');
 }
 

@@ -544,7 +544,7 @@ test "comprehensive" {
         \\<p>this is not escaped</p>
         \\&lt;p&gt;this is not escapedddd&lt;/p&gt;
         \\<p>this is not escapedddd</p>
-        \\<div x="1" y="2" z="3" w="4" v="5" v="6\"\'" q="11-22">div with silly attributes</div>
+        \\<div x="1" y="2" z="3" w="4" v="5" v="6&quot;'" q="11-22">div with silly attributes</div>
         \\
         \\<div id="6" class="div-color">div with normal attributes</div>
         \\

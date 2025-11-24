@@ -314,15 +314,15 @@ pub const Elem = struct {
     }
 
     pub fn begin(self: @This()) void {
-        invokeUnwrap(self, "begin", .{}) catch {};
+        invokeUnwrap(self, Zhtml.Elem.begin, .{}) catch {};
     }
 
     pub fn end(self: @This()) void {
-        invokeUnwrap(self, "end", .{}) catch {};
+        invokeUnwrap(self, Zhtml.Elem.end, .{}) catch {};
     }
 
     pub fn render(self: @This(), str: []const u8) void {
-        invokeUnwrap(self, "render", .{str}) catch {};
+        invokeUnwrap(self, Zhtml.Elem.render, .{str}) catch {};
     }
 
     pub fn renderf(
@@ -331,7 +331,7 @@ pub const Elem = struct {
         comptime fmt: []const u8,
         args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, "renderf", .{ allocator, fmt, args }) catch |err| {
+        invokeUnwrap(self, Zhtml.Elem.renderf, .{ allocator, fmt, args }) catch |err| {
             switch (err) {
                 Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
                 Zhtml.WriterError.WriteFailed,
@@ -344,15 +344,15 @@ pub const Elem = struct {
     }
 
     pub fn @"<>"(self: @This()) void {
-        invokeUnwrap(self, "begin", .{}) catch {};
+        invokeUnwrap(self, Zhtml.Elem.begin, .{}) catch {};
     }
 
     pub fn @"</>"(self: @This()) void {
-        invokeUnwrap(self, "end", .{}) catch {};
+        invokeUnwrap(self, Zhtml.Elem.end, .{}) catch {};
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) void {
-        invokeUnwrap(self, "attr", .{ key, value }) catch {};
+        invokeUnwrap(self, Zhtml.Elem.attr, .{ key, value }) catch {};
     }
 
     pub fn attrf(
@@ -361,7 +361,7 @@ pub const Elem = struct {
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, "attrf", .{ key, fmt, fmt_args }) catch |err| {
+        invokeUnwrap(self, Zhtml.Elem.attrf, .{ key, fmt, fmt_args }) catch |err| {
             switch (err) {
                 Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
                 Zhtml.Error.ClosingTagMismatch,
@@ -373,11 +373,11 @@ pub const Elem = struct {
     }
 
     pub fn attrs(self: @This(), args: anytype) void {
-        invokeUnwrap(self, "attrs", .{args}) catch {};
+        invokeUnwrap(self, Zhtml.Elem.attrs, .{args}) catch {};
     }
 
     pub fn withAttr(self: @This(), key: anytype, value: []const u8) @This() {
-        invokeUnwrap(self, "attr", .{ key, value }) catch {};
+        invokeUnwrap(self, Zhtml.Elem.attr, .{ key, value }) catch {};
         return self;
     }
 };
@@ -387,15 +387,15 @@ const CommentElem = struct {
     _internal: *Internal,
 
     pub fn begin(self: @This()) void {
-        invokeUnwrap(self, "begin", .{}) catch {};
+        invokeUnwrap(self, Zhtml.CommentElem.begin, .{}) catch {};
     }
 
     pub fn end(self: @This()) void {
-        invokeUnwrap(self, "end", .{}) catch {};
+        invokeUnwrap(self, Zhtml.CommentElem.end, .{}) catch {};
     }
 
     pub fn render(self: @This(), str: []const u8) void {
-        invokeUnwrap(self, "render", .{str}) catch {};
+        invokeUnwrap(self, Zhtml.CommentElem.render, .{str}) catch {};
     }
 
     pub fn renderf(
@@ -404,7 +404,7 @@ const CommentElem = struct {
         comptime fmt: []const u8,
         args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, "renderf", .{ allocator, fmt, args }) catch |err| {
+        invokeUnwrap(self, Zhtml.CommentElem.renderf, .{ allocator, fmt, args }) catch |err| {
             switch (err) {
                 Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
                 Zhtml.WriterError.WriteFailed,
@@ -429,15 +429,15 @@ pub const VoidElem = struct {
     }
 
     pub fn render(self: @This()) void {
-        invokeUnwrap(self, "render", .{}) catch {};
+        invokeUnwrap(self, Zhtml.VoidElem.render, .{}) catch {};
     }
 
     pub fn @"<>"(self: @This()) void {
-        invokeUnwrap(self, "render", .{}) catch {};
+        invokeUnwrap(self, Zhtml.VoidElem.render, .{}) catch {};
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) void {
-        invokeUnwrap(self, "attr", .{ key, value }) catch {};
+        invokeUnwrap(self, Zhtml.VoidElem.attr, .{ key, value }) catch {};
     }
 
     pub fn attrf(
@@ -446,7 +446,7 @@ pub const VoidElem = struct {
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, "attrf", .{ key, fmt, fmt_args }) catch |err| {
+        invokeUnwrap(self, Zhtml.VoidElem.attrf, .{ key, fmt, fmt_args }) catch |err| {
             switch (err) {
                 Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
                 Zhtml.Error.ClosingTagMismatch,
@@ -458,11 +458,11 @@ pub const VoidElem = struct {
     }
 
     pub fn attrs(self: @This(), args: anytype) void {
-        invokeUnwrap(self, "attrs", .{args}) catch {};
+        invokeUnwrap(self, Zhtml.VoidElem.attrs, .{args}) catch {};
     }
 
     pub fn withAttr(self: @This(), key: anytype, value: []const u8) @This() {
-        invokeUnwrap(self, "attr", .{ key, value }) catch {};
+        invokeUnwrap(self, Zhtml.VoidElem.attr, .{ key, value }) catch {};
         return self;
     }
 };
@@ -472,18 +472,17 @@ pub const VoidElem = struct {
 // - checks if an error already exists, when then it just returns
 // - stores the error returned if any
 //
-// For instance, `invokeUnwrap(elem, "foo", .{x, y})` would be equivalent to:
-//
+// For instance, `invokeUnwrap(elem, Elem.foo, .{x, y})` would be equivalent to: //
 //   elem._internal.getLastError() catch return;
 //   elem.foo(x, y) catch |err| {
 //       elem._internal.setError(err);
 //       return err;
 //   }
-inline fn invokeUnwrap(self: anytype, comptime method_name: []const u8, args: anytype) !void {
+fn invokeUnwrap(self: anytype, func: anytype, args: anytype) !void {
     const internal = @field(self, "_internal");
     const elem = @field(self, "unwrap");
     Meta.callMethod(internal.*, "getError", .{}) catch return;
-    Meta.callMethod(elem, method_name, args) catch |err| {
+    @call(.auto, func, .{elem} ++ args) catch |err| {
         Meta.callMethod(internal, "setError", .{err});
         return err;
     };
@@ -534,6 +533,7 @@ test "last error" {
     z.div.@"<>"();
     z.p.@"</>"();
     try std.testing.expectError(Zhtml.Error.ClosingTagMismatch, z.getError());
+    z.clearError();
 }
 
 test "comprehensive" {

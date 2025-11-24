@@ -13,8 +13,15 @@ const Internal = struct {
     stack: TagStack,
     pending_attrs: PendingAttrs,
 
+    // used for attribute values that are formatted
+    arena: std.heap.ArenaAllocator,
+
     depth: i16 = 0,
     last_written: u8 = 0,
+
+    inline fn resetArena(self: *@This()) void {
+        _ = self.arena.reset(.{ .retain_with_limit = 2048 });
+    }
 
     inline fn writeByte(self: *@This(), ch: u8) !void {
         try self.w.writeByte(ch);
@@ -151,6 +158,7 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
         .w = w,
         .stack = .{ .allocator = allocator },
         .pending_attrs = .{},
+        .arena = .init(allocator),
     };
 
     inline for (std.meta.fields(Zhtml)) |field| {
@@ -179,11 +187,28 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
 
 pub fn deinit(self: Zhtml, allocator: Allocator) void {
     self._internal.stack.items.deinit(allocator);
+    self._internal.arena.deinit();
     allocator.destroy(self._internal);
 }
 
 pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
-    return self._internal.pending_attrs.add(null, key, value);
+    return self._internal.pending_attrs.add(null, key, value, false);
+}
+
+pub fn attrf(
+    self: @This(),
+    key: anytype,
+    comptime fmt: []const u8,
+    fmt_args: anytype,
+) (AllocatorError || Error)!void {
+    const allocator = self._internal.arena.allocator();
+    return self._internal.pending_attrs.addFormatted(
+        allocator,
+        null,
+        key,
+        fmt,
+        fmt_args,
+    );
 }
 
 pub fn attrs(self: @This(), args: anytype) Error!void {
@@ -241,10 +266,12 @@ pub const Elem = struct {
         if (builtin.mode == .Debug) {
             z.stack.push(self.tag);
         }
+
         try z.writeIndent();
         try z.writeAll("<");
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
+        self._internal.resetArena();
         try z.writeAll(">\n");
         z.depth += 1;
     }
@@ -271,6 +298,7 @@ pub const Elem = struct {
         try z.writeAll("<");
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
+        self._internal.resetArena();
         try z.writeAll(">");
         try z.writeEscapedContent(str);
         try z.writeAll("</");
@@ -298,18 +326,23 @@ pub const Elem = struct {
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
-        return self._internal.pending_attrs.add(self.tag, key, value);
+        return self._internal.pending_attrs.add(self.tag, key, value, false);
     }
 
     pub fn attrf(
         self: @This(),
-        arena: Allocator,
         key: anytype,
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) (AllocatorError || Error)!void {
-        const value = try std.fmt.allocPrint(arena, fmt, fmt_args);
-        return self._internal.pending_attrs.add(self.tag, key, value);
+        const allocator = self._internal.arena.allocator();
+        return self._internal.pending_attrs.addFormatted(
+            allocator,
+            self.tag,
+            key,
+            fmt,
+            fmt_args,
+        );
     }
 
     pub fn attrs(self: @This(), args: anytype) Error!void {
@@ -384,26 +417,28 @@ pub const VoidElem = struct {
         try z.writeAll("<");
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
+        self._internal.resetArena();
         try z.writeAll(">\n");
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
-        return self._internal.pending_attrs.add(
-            self.tag,
-            key,
-            value,
-        );
+        return self._internal.pending_attrs.add(self.tag, key, value, false);
     }
 
     pub fn attrf(
         self: @This(),
-        arena: Allocator,
         key: anytype,
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) (AllocatorError || Error)!void {
-        const value = try std.fmt.allocPrint(arena, fmt, fmt_args);
-        return self._internal.pending_attrs.add(self.tag, key, value);
+        const allocator = self._internal.arena.allocator();
+        return self._internal.pending_attrs.addFormatted(
+            allocator,
+            self.tag,
+            key,
+            fmt,
+            fmt_args,
+        );
     }
 
     pub fn attrs(self: @This(), args: anytype) Error!void {
@@ -414,9 +449,21 @@ pub const VoidElem = struct {
 const PendingAttrs = struct {
     index: usize = 0,
     tag: []const u8 = "",
-    attrs: [512]struct { []const u8, []const u8 } = undefined,
+    attrs: [512]Entry = undefined,
 
-    fn add(self: *@This(), tag: ?[]const u8, key_arg: anytype, value: []const u8) Error!void {
+    const Entry = struct {
+        key: []const u8,
+        value: []const u8,
+        allocated: bool = false,
+    };
+
+    fn add(
+        self: *@This(),
+        tag: ?[]const u8,
+        key_arg: anytype,
+        value: []const u8,
+        allocated: bool,
+    ) Error!void {
         if (builtin.mode == .Debug) if (tag) |name| {
             if (self.tag.len > 0 and !std.mem.eql(u8, name, self.tag)) {
                 std.debug.print(
@@ -434,8 +481,24 @@ const PendingAttrs = struct {
             .enum_literal => @tagName(key_arg),
             else => key_arg,
         };
-        self.attrs[self.index] = .{ key, value };
+        self.attrs[self.index] = .{
+            .key = key,
+            .value = value,
+            .allocated = allocated,
+        };
         self.index += 1;
+    }
+
+    fn addFormatted(
+        self: *@This(),
+        allocator: Allocator,
+        tag: ?[]const u8,
+        key_arg: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) (AllocatorError || Error)!void {
+        const value = try std.fmt.allocPrint(allocator, fmt, fmt_args);
+        return self.add(tag, key_arg, value, true);
     }
 
     fn addMany(self: *@This(), tag: ?[]const u8, args: anytype) Error!void {
@@ -458,7 +521,7 @@ const PendingAttrs = struct {
                 .enum_literal => @tagName(fname),
                 else => fname,
             };
-            self.attrs[self.index] = .{ key, @field(args, field.name) };
+            self.attrs[self.index] = .{ .key = key, .value = @field(args, field.name) };
             self.index += 1;
         }
     }
@@ -481,11 +544,14 @@ const PendingAttrs = struct {
         }
 
         for (0..self.index) |i| {
-            const key, const value = self.attrs[i];
+            const item = &self.attrs[i];
             try w.writeByte(' ');
-            try w.writeAll(key);
+            try w.writeAll(item.key);
             try w.writeByte('=');
-            try writeEscapedAttr(w, value);
+            try writeEscapedAttr(w, item.value);
+
+            item.key = "";
+            item.value = "";
         }
 
         self.index = 0;

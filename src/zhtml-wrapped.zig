@@ -357,12 +357,11 @@ pub const Elem = struct {
 
     pub fn attrf(
         self: @This(),
-        arena: Allocator,
         key: anytype,
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, "attrf", .{ arena, key, fmt, fmt_args }) catch |err| {
+        invokeUnwrap(self, "attrf", .{ key, fmt, fmt_args }) catch |err| {
             switch (err) {
                 Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
                 Zhtml.Error.ClosingTagMismatch,
@@ -443,12 +442,11 @@ pub const VoidElem = struct {
 
     pub fn attrf(
         self: @This(),
-        arena: Allocator,
         key: anytype,
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, "attrf", .{ arena, key, fmt, fmt_args }) catch |err| {
+        invokeUnwrap(self, "attrf", .{ key, fmt, fmt_args }) catch |err| {
             switch (err) {
                 Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
                 Zhtml.Error.ClosingTagMismatch,
@@ -584,7 +582,7 @@ test "comprehensive" {
     z.attrs(.{ .z = "3", .w = "4" });
     z.div.attr(.v, "5");
     z.div.attr(.v, "6\"'");
-    try z.div.attrf(allocator, .q, "{d}-{d}", .{ 11, 22 });
+    try z.div.attrf(.q, "{d}-{d}", .{ 11, 22 });
     z.div.render("div with silly attributes");
     z.write("\n");
 
@@ -597,7 +595,7 @@ test "comprehensive" {
     z.div.@"<>"();
     {
         z.img.withAttr(.src, "image1.png").render();
-        try z.img.attrf(allocator, .class, "{s} {s}", .{ "aa", "bb" });
+        try z.img.attrf(.class, "{s} {s}", .{ "aa", "bb" });
         z.img.attr(.src, "image2.png");
         z.img.@"<>"();
         z.br.@"<>"();

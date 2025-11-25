@@ -18,7 +18,7 @@ h2.@"</>"();
 ul.begin();
 for (0..5) |i| {
     if (i % 2 == 0) {
-      try li.renderf(allocator, "item {d}", .{i});
+      try li.renderf("item {d}", .{i});
     }
 }
 ul.end();

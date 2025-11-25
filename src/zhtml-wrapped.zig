@@ -274,12 +274,11 @@ pub fn @"writeUnsafe!?"(self: @This(), str: []const u8) void {
 
 pub fn print(
     self: @This(),
-    gpa: Allocator,
     comptime fmt: []const u8,
     args: anytype,
 ) Allocator.Error!void {
     self.getError() catch return;
-    self.unwrap.print(gpa, fmt, args) catch |err| {
+    self.unwrap.print(fmt, args) catch |err| {
         switch (err) {
             Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
             Zhtml.WriterError.WriteFailed => self.setLastError(err),
@@ -289,12 +288,11 @@ pub fn print(
 
 pub fn @"printUnsafe!?"(
     self: @This(),
-    gpa: Allocator,
     comptime fmt: []const u8,
     args: anytype,
 ) Allocator.Error!void {
     self.getError() catch return;
-    self.unwrap.@"printUnsafe!?"(gpa, fmt, args) catch |err| {
+    self.unwrap.@"printUnsafe!?"(fmt, args) catch |err| {
         switch (err) {
             Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
             Zhtml.WriterError.WriteFailed => self.setLastError(err),
@@ -584,8 +582,8 @@ test "comprehensive" {
 
     z.write("<p>this is escaped</p>\n");
     z.@"writeUnsafe!?"("<p>this is not escaped</p>\n");
-    try z.print(allocator, "<p>this is not escape{s}</p>\n", .{"dddd"});
-    try z.@"printUnsafe!?"(allocator, "<p>this is not escape{s}</p>\n", .{"dddd"});
+    try z.print("<p>this is not escape{s}</p>\n", .{"dddd"});
+    try z.@"printUnsafe!?"("<p>this is not escape{s}</p>\n", .{"dddd"});
 
     z.attr(.x, "1");
     z.attr("y", "2");

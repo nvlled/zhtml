@@ -226,12 +226,12 @@ pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) WriterError!void 
 
 pub fn print(
     self: @This(),
-    gpa: Allocator,
     comptime fmt: []const u8,
     args: anytype,
 ) (WriterError || AllocatorError)!void {
-    const str = try std.fmt.allocPrint(gpa, fmt, args);
-    defer gpa.free(str);
+    const allocator = self._internal.fmt_arena.allocator();
+    const str = try std.fmt.allocPrint(allocator, fmt, args);
+    defer allocator.free(str);
 
     try self._internal.writeIndent();
     try self._internal.writeEscapedContent(str);
@@ -239,12 +239,12 @@ pub fn print(
 
 pub fn @"printUnsafe!?"(
     self: @This(),
-    gpa: Allocator,
     comptime fmt: []const u8,
     args: anytype,
 ) (WriterError || AllocatorError)!void {
-    const str = try std.fmt.allocPrint(gpa, fmt, args);
-    defer gpa.free(str);
+    const allocator = self._internal.fmt_arena.allocator();
+    const str = try std.fmt.allocPrint(allocator, fmt, args);
+    defer allocator.free(str);
 
     try self._internal.writeIndent();
     try self._internal.writeAll(str);

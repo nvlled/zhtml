@@ -13,14 +13,14 @@ const Internal = struct {
     stack: TagStack,
     pending_attrs: PendingAttrs,
 
-    // used for attribute values that are formatted
-    arena: std.heap.ArenaAllocator,
+    // used for temporry allocated formatted strings
+    fmt_arena: std.heap.ArenaAllocator,
 
     depth: i16 = 0,
     last_written: u8 = 0,
 
     inline fn resetArena(self: *@This()) void {
-        _ = self.arena.reset(.{ .retain_with_limit = 2048 });
+        _ = self.fmt_arena.reset(.{ .retain_with_limit = 2048 });
     }
 
     inline fn writeByte(self: *@This(), ch: u8) !void {
@@ -158,7 +158,7 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
         .w = w,
         .stack = .{ .allocator = allocator },
         .pending_attrs = .{},
-        .arena = .init(allocator),
+        .fmt_arena = .init(allocator),
     };
 
     inline for (std.meta.fields(Zhtml)) |field| {
@@ -187,7 +187,7 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
 
 pub fn deinit(self: Zhtml, allocator: Allocator) void {
     self._internal.stack.items.deinit(allocator);
-    self._internal.arena.deinit();
+    self._internal.fmt_arena.deinit();
     allocator.destroy(self._internal);
 }
 
@@ -201,7 +201,7 @@ pub fn attrf(
     comptime fmt: []const u8,
     fmt_args: anytype,
 ) (AllocatorError || Error)!void {
-    const allocator = self._internal.arena.allocator();
+    const allocator = self._internal.fmt_arena.allocator();
     return self._internal.pending_attrs.addFormatted(
         allocator,
         null,
@@ -308,10 +308,10 @@ pub const Elem = struct {
 
     pub fn renderf(
         self: @This(),
-        allocator: Allocator,
         comptime fmt: []const u8,
         args: anytype,
     ) (Error || AllocatorError || WriterError)!void {
+        const allocator = self._internal.fmt_arena.allocator();
         const str = try std.fmt.allocPrint(allocator, fmt, args);
         defer allocator.free(str);
         try self.render(str);
@@ -335,7 +335,7 @@ pub const Elem = struct {
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) (AllocatorError || Error)!void {
-        const allocator = self._internal.arena.allocator();
+        const allocator = self._internal.fmt_arena.allocator();
         return self._internal.pending_attrs.addFormatted(
             allocator,
             self.tag,
@@ -390,10 +390,10 @@ pub const CommentElem = struct {
 
     pub fn renderf(
         self: @This(),
-        allocator: Allocator,
         comptime fmt: []const u8,
         args: anytype,
     ) (Error || AllocatorError || WriterError)!void {
+        const allocator = self._internal.fmt_arena.allocator();
         const str = try std.fmt.allocPrint(allocator, fmt, args);
         defer allocator.free(str);
         try self.render(str);
@@ -431,7 +431,7 @@ pub const VoidElem = struct {
         comptime fmt: []const u8,
         fmt_args: anytype,
     ) (AllocatorError || Error)!void {
-        const allocator = self._internal.arena.allocator();
+        const allocator = self._internal.fmt_arena.allocator();
         return self._internal.pending_attrs.addFormatted(
             allocator,
             self.tag,
@@ -752,7 +752,7 @@ test {
         try ul.begin();
         for (0..10) |i| {
             if (i % 2 != 0) continue;
-            try li.renderf(allocator, "item {d}", .{i});
+            try li.renderf("item {d}", .{i});
         }
         try ul.end();
     }
@@ -787,7 +787,7 @@ test "formatting and printing" {
     try div.attr(.class, try fmt.string("foo-{d}", .{123}));
     try div.@"<>"();
     {
-        try z.div.renderf(allocator, "{d} {d} {d}", .{ 1, 2, 3 });
+        try z.div.renderf("{d} {d} {d}", .{ 1, 2, 3 });
         try div.render(try fmt.string("{d} {d} {d}", .{ 4, 5, 6 }));
     }
     try div.@"</>"();

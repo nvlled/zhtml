@@ -327,18 +327,20 @@ pub const Elem = struct {
 
     pub fn renderf(
         self: @This(),
-        allocator: Allocator,
         comptime fmt: []const u8,
         args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, Zhtml.Elem.renderf, .{ allocator, fmt, args }) catch |err| {
+        invokeUnwrap(self, Zhtml.Elem.renderf, .{ fmt, args }) catch |err| {
             switch (err) {
-                Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+                Allocator.Error.OutOfMemory => |alloc_err| {
+                    self._internal.clearError();
+                    return alloc_err;
+                },
                 Zhtml.WriterError.WriteFailed,
                 Zhtml.Error.ClosingTagMismatch,
                 Zhtml.Error.TagAttrMismatch,
                 Zhtml.Error.TooManyAttrs,
-                => self._internal.setError(err),
+                => {},
             }
         };
     }
@@ -363,11 +365,14 @@ pub const Elem = struct {
     ) Allocator.Error!void {
         invokeUnwrap(self, Zhtml.Elem.attrf, .{ key, fmt, fmt_args }) catch |err| {
             switch (err) {
-                Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+                Allocator.Error.OutOfMemory => |alloc_err| {
+                    self._internal.clearError();
+                    return alloc_err;
+                },
                 Zhtml.Error.ClosingTagMismatch,
                 Zhtml.Error.TagAttrMismatch,
                 Zhtml.Error.TooManyAttrs,
-                => self._internal.setError(err),
+                => {},
             }
         };
     }
@@ -400,18 +405,20 @@ const CommentElem = struct {
 
     pub fn renderf(
         self: @This(),
-        allocator: Allocator,
         comptime fmt: []const u8,
         args: anytype,
     ) Allocator.Error!void {
-        invokeUnwrap(self, Zhtml.CommentElem.renderf, .{ allocator, fmt, args }) catch |err| {
+        invokeUnwrap(self, Zhtml.CommentElem.renderf, .{ fmt, args }) catch |err| {
             switch (err) {
-                Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+                Allocator.Error.OutOfMemory => |alloc_err| {
+                    self._internal.clearError();
+                    return alloc_err;
+                },
                 Zhtml.WriterError.WriteFailed,
                 Zhtml.Error.ClosingTagMismatch,
                 Zhtml.Error.TagAttrMismatch,
                 Zhtml.Error.TooManyAttrs,
-                => self._internal.setError(err),
+                => {},
             }
         };
     }
@@ -448,11 +455,14 @@ pub const VoidElem = struct {
     ) Allocator.Error!void {
         invokeUnwrap(self, Zhtml.VoidElem.attrf, .{ key, fmt, fmt_args }) catch |err| {
             switch (err) {
-                Allocator.Error.OutOfMemory => |alloc_err| return alloc_err,
+                Allocator.Error.OutOfMemory => |alloc_err| {
+                    self._internal.clearError();
+                    return alloc_err;
+                },
                 Zhtml.Error.ClosingTagMismatch,
                 Zhtml.Error.TagAttrMismatch,
                 Zhtml.Error.TooManyAttrs,
-                => self._internal.setError(err),
+                => {},
             }
         };
     }
@@ -589,7 +599,7 @@ test "comprehensive" {
     z.div.attr(.id, "6");
     try z.div
         .withAttr(.class, "div-color")
-        .renderf(allocator, "div with {s} attributes", .{"normal"});
+        .renderf("div with {s} attributes", .{"normal"});
     z.write("\n");
 
     z.div.@"<>"();
@@ -607,7 +617,7 @@ test "comprehensive" {
 
     z.comment.render("a comment");
 
-    try z.comment.renderf(allocator, "{s} comment", .{"another"});
+    try z.comment.renderf("{s} comment", .{"another"});
 
     z.comment.begin();
     z.write("more comment");

@@ -114,7 +114,7 @@ pub fn example3(allocator_arg: std.mem.Allocator) !void {
         z.ul.begin();
         for (0..20) |i| {
             if (i % 2 == 0) {
-                try z.li.renderf(allocator, "item no. {d}", .{i});
+                try z.li.renderf("item no. {d}", .{i});
             }
         }
         z.ul.end();

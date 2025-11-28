@@ -266,6 +266,7 @@ pub const Elem = struct {
         if (builtin.mode == .Debug) {
             z.stack.push(self.tag);
         }
+        errdefer z.writeAll(">") catch {};
 
         try z.writeIndent();
         try z.writeAll("<");
@@ -283,6 +284,8 @@ pub const Elem = struct {
 
         const z = self._internal;
         z.depth -= 1;
+
+        errdefer z.writeAll(">") catch {};
         try z.writeIndent();
         try z.writeAll("</");
         try z.writeAll(self.tag);
@@ -294,6 +297,8 @@ pub const Elem = struct {
         str: []const u8,
     ) (Error || WriterError)!void {
         const z = self._internal;
+        errdefer z.writeAll(">") catch {};
+
         try z.writeIndent();
         try z.writeAll("<");
         try z.writeAll(self.tag);
@@ -365,6 +370,7 @@ pub const CommentElem = struct {
         }
 
         const z = self._internal;
+        errdefer z.writeAll(">") catch {};
         try z.writeIndent();
         try z.writeAll("<!--\n");
     }
@@ -382,6 +388,7 @@ pub const CommentElem = struct {
     pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
         const z = self._internal;
         z.pending_attrs.clear();
+        errdefer z.writeAll(">") catch {};
         try z.writeIndent();
         try z.writeAll("<!--");
         try z.writeEscapedContent(str);
@@ -413,6 +420,7 @@ pub const VoidElem = struct {
 
     pub fn render(self: @This()) (Error || WriterError)!void {
         const z = self._internal;
+        errdefer z.writeAll(">") catch {};
         try z.writeIndent();
         try z.writeAll("<");
         try z.writeAll(self.tag);

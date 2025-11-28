@@ -541,6 +541,9 @@ const PendingAttrs = struct {
     fn writeAndClear(self: *@This(), tag: []const u8, w: *std.Io.Writer) !void {
         if (self.index == 0) return;
 
+        defer self.index = 0;
+        defer self.tag = "";
+
         if (builtin.mode == .Debug) {
             if (self.tag.len > 0 and !std.mem.eql(u8, tag, self.tag)) {
                 std.debug.print(
@@ -561,9 +564,6 @@ const PendingAttrs = struct {
             item.key = "";
             item.value = "";
         }
-
-        self.index = 0;
-        self.tag = "";
     }
 };
 

@@ -300,6 +300,11 @@ pub fn @"printUnsafe!?"(
     };
 }
 
+// Returns true if anything has been written to the std.Io.Writer.
+pub fn written(self: @This()) bool {
+    return self.unwrap.written();
+}
+
 pub const Elem = struct {
     unwrap: Zhtml.Elem,
     _internal: *Internal,

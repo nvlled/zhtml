@@ -19,6 +19,8 @@ const Internal = struct {
     depth: i16 = 0,
     last_written: u8 = 0,
 
+    written: bool = false,
+
     inline fn resetArena(self: *@This()) void {
         _ = self.fmt_arena.reset(.{ .retain_with_limit = 2048 });
     }
@@ -218,6 +220,7 @@ pub fn attrs(self: @This(), args: anytype) Error!void {
 pub inline fn write(self: @This(), str: []const u8) WriterError!void {
     try self._internal.writeIndent();
     try self._internal.writeEscapedContent(str);
+    self._internal.written = true;
 }
 
 pub inline fn @"writeUnsafe!?"(self: @This(), str: []const u8) WriterError!void {
@@ -235,6 +238,7 @@ pub fn print(
 
     try self._internal.writeIndent();
     try self._internal.writeEscapedContent(str);
+    self._internal.written = true;
 }
 
 pub fn @"printUnsafe!?"(
@@ -248,6 +252,12 @@ pub fn @"printUnsafe!?"(
 
     try self._internal.writeIndent();
     try self._internal.writeAll(str);
+    self._internal.written = true;
+}
+
+// Returns true if anything has been written to the std.Io.Writer.
+pub fn written(self: @This()) bool {
+    return self._internal.written;
 }
 
 pub const Elem = struct {
@@ -275,6 +285,7 @@ pub const Elem = struct {
         self._internal.resetArena();
         try z.writeAll(">\n");
         z.depth += 1;
+        self._internal.written = true;
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
@@ -290,6 +301,7 @@ pub const Elem = struct {
         try z.writeAll("</");
         try z.writeAll(self.tag);
         try z.writeAll(">\n");
+        self._internal.written = true;
     }
 
     pub fn render(
@@ -309,6 +321,7 @@ pub const Elem = struct {
         try z.writeAll("</");
         try z.writeAll(self.tag);
         try z.writeAll(">\n");
+        self._internal.written = true;
     }
 
     pub fn renderf(
@@ -320,6 +333,7 @@ pub const Elem = struct {
         const str = try std.fmt.allocPrint(allocator, fmt, args);
         defer allocator.free(str);
         try self.render(str);
+        self._internal.written = true;
     }
 
     pub inline fn @"<>"(self: @This()) (Error || WriterError)!void {
@@ -373,6 +387,7 @@ pub const CommentElem = struct {
         errdefer z.writeAll(">") catch {};
         try z.writeIndent();
         try z.writeAll("<!--\n");
+        self._internal.written = true;
     }
 
     pub fn end(self: @This()) (Error || WriterError)!void {
@@ -383,6 +398,7 @@ pub const CommentElem = struct {
         const z = self._internal;
         try z.writeIndent();
         try z.writeAll("-->\n");
+        self._internal.written = true;
     }
 
     pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
@@ -393,6 +409,7 @@ pub const CommentElem = struct {
         try z.writeAll("<!--");
         try z.writeEscapedContent(str);
         try z.writeAll("-->\n");
+        self._internal.written = true;
     }
 
     pub fn renderf(
@@ -404,6 +421,7 @@ pub const CommentElem = struct {
         const str = try std.fmt.allocPrint(allocator, fmt, args);
         defer allocator.free(str);
         try self.render(str);
+        self._internal.written = true;
     }
 };
 
@@ -427,6 +445,7 @@ pub const VoidElem = struct {
         try z.pending_attrs.writeAndClear(self.tag, z.w);
         self._internal.resetArena();
         try z.writeAll(">\n");
+        self._internal.written = true;
     }
 
     pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
@@ -860,6 +879,19 @@ test "invalid closing tag" {
 
     const err = z.div.@"</>"();
     try std.testing.expectError(Error.ClosingTagMismatch, err);
+}
+
+test "written closing tag" {
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    try std.testing.expect(!z.written());
+    try z.write("something");
+    try std.testing.expect(z.written());
 }
 
 test {

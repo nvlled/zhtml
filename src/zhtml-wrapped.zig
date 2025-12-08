@@ -135,7 +135,7 @@ li: Elem,
 
 form: Elem,
 input: VoidElem,
-textarea: Elem,
+textarea: TextArea,
 button: Elem,
 label: Elem,
 select: Elem,
@@ -210,6 +210,10 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
             },
             Zhtml.Elem => @field(self, field.name) = .{
                 .unwrap = Zhtml.Elem.init(field.name, self.unwrap),
+                ._internal = self._internal,
+            },
+            Zhtml.TextArea => @field(self, field.name) = .{
+                .unwrap = Zhtml.TextArea.init(self.unwrap),
                 ._internal = self._internal,
             },
 
@@ -386,6 +390,75 @@ pub const Elem = struct {
 
     pub fn withAttr(self: @This(), key: anytype, value: []const u8) @This() {
         invokeUnwrap(self, Zhtml.Elem.attr, .{ key, value }) catch {};
+        return self;
+    }
+};
+
+pub const TextArea = struct {
+    unwrap: Zhtml.TextArea,
+    _internal: *Internal,
+
+    pub fn init(zhtml: ZhtmlWrapped) @This() {
+        return .{
+            .unwrap = .init(zhtml.unwrap),
+            ._internal = zhtml._internal,
+        };
+    }
+
+    pub fn render(self: @This(), str: []const u8) void {
+        invokeUnwrap(self, Zhtml.TextArea.render, .{str}) catch {};
+    }
+
+    pub fn renderf(
+        self: @This(),
+        comptime fmt: []const u8,
+        args: anytype,
+    ) Allocator.Error!void {
+        invokeUnwrap(self, Zhtml.TextArea.renderf, .{ fmt, args }) catch |err| {
+            switch (err) {
+                Allocator.Error.OutOfMemory => |alloc_err| {
+                    self._internal.clearError();
+                    return alloc_err;
+                },
+                Zhtml.WriterError.WriteFailed,
+                Zhtml.Error.ClosingTagMismatch,
+                Zhtml.Error.TagAttrMismatch,
+                Zhtml.Error.TooManyAttrs,
+                => {},
+            }
+        };
+    }
+
+    pub fn attr(self: @This(), key: anytype, value: []const u8) void {
+        invokeUnwrap(self, Zhtml.TextArea.attr, .{ key, value }) catch {};
+    }
+
+    pub fn attrf(
+        self: @This(),
+        key: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) Allocator.Error!void {
+        invokeUnwrap(self, Zhtml.TextArea.attrf, .{ key, fmt, fmt_args }) catch |err| {
+            switch (err) {
+                Allocator.Error.OutOfMemory => |alloc_err| {
+                    self._internal.clearError();
+                    return alloc_err;
+                },
+                Zhtml.Error.ClosingTagMismatch,
+                Zhtml.Error.TagAttrMismatch,
+                Zhtml.Error.TooManyAttrs,
+                => {},
+            }
+        };
+    }
+
+    pub fn attrs(self: @This(), args: anytype) void {
+        invokeUnwrap(self, Zhtml.TextArea.attrs, .{args}) catch {};
+    }
+
+    pub fn withAttr(self: @This(), key: anytype, value: []const u8) @This() {
+        invokeUnwrap(self, Zhtml.TextArea.attr, .{ key, value }) catch {};
         return self;
     }
 };

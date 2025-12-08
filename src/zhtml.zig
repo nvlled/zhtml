@@ -118,7 +118,7 @@ li: Elem,
 
 form: Elem,
 input: VoidElem,
-textarea: Elem,
+textarea: TextArea,
 button: Elem,
 label: Elem,
 select: Elem,
@@ -177,6 +177,10 @@ pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
 
             VoidElem, Elem => @field(self, field.name) = .{
                 .tag = field.name,
+                ._internal = self._internal,
+            },
+
+            TextArea => @field(self, field.name) = .{
                 ._internal = self._internal,
             },
 
@@ -366,6 +370,74 @@ pub const Elem = struct {
 
     pub fn attrs(self: @This(), args: anytype) Error!void {
         return self._internal.pending_attrs.addMany(self.tag, args);
+    }
+};
+
+pub const TextArea = struct {
+    _internal: *Internal,
+
+    const tag = "textarea";
+
+    pub fn init(zhtml: *Zhtml) TextArea {
+        return .{
+            ._internal = zhtml._internal,
+        };
+    }
+
+    pub fn render(
+        self: @This(),
+        str: []const u8,
+    ) (Error || WriterError)!void {
+        const z = self._internal;
+        errdefer z.writeAll(">") catch {};
+
+        try z.writeIndent();
+        try z.writeAll("<");
+        try z.writeAll(tag);
+        try z.pending_attrs.writeAndClear(tag, z.w);
+        self._internal.resetArena();
+        try z.writeAll(">");
+        try z.writeAll(str);
+        try z.writeAll("</");
+        try z.writeAll(tag);
+        try z.writeAll(">\n");
+        self._internal.written = true;
+    }
+
+    pub fn renderf(
+        self: @This(),
+        comptime fmt: []const u8,
+        args: anytype,
+    ) (Error || AllocatorError || WriterError)!void {
+        const allocator = self._internal.fmt_arena.allocator();
+        const str = try std.fmt.allocPrint(allocator, fmt, args);
+        defer allocator.free(str);
+        try self.render(str);
+        self._internal.written = true;
+    }
+
+    pub fn attr(self: @This(), key: anytype, value: []const u8) Error!void {
+        return self._internal.pending_attrs.add(tag, key, value, false);
+    }
+
+    pub fn attrf(
+        self: @This(),
+        key: anytype,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+    ) (AllocatorError || Error)!void {
+        const allocator = self._internal.fmt_arena.allocator();
+        return self._internal.pending_attrs.addFormatted(
+            allocator,
+            tag,
+            key,
+            fmt,
+            fmt_args,
+        );
+    }
+
+    pub fn attrs(self: @This(), args: anytype) Error!void {
+        return self._internal.pending_attrs.addMany(tag, args);
     }
 };
 

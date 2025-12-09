@@ -309,6 +309,17 @@ pub fn written(self: @This()) bool {
     return self.unwrap.written();
 }
 
+// Return true if document should be formatted,
+// which means nodes will be indented based on depth
+// and add corresponding newlines.
+pub fn formatted(self: @This()) bool {
+    return self.unwrap._internal.formatted;
+}
+
+pub fn setFormatted(self: @This(), value: bool) void {
+    self.unwrap._internal.formatted = value;
+}
+
 pub const Elem = struct {
     unwrap: Zhtml.Elem,
     _internal: *Internal,

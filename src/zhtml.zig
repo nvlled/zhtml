@@ -20,6 +20,7 @@ const Internal = struct {
     last_written: u8 = 0,
 
     written: bool = false,
+    formatted: bool = true,
 
     inline fn resetArena(self: *@This()) void {
         _ = self.fmt_arena.reset(.{ .retain_with_limit = 2048 });
@@ -27,33 +28,71 @@ const Internal = struct {
 
     inline fn writeByte(self: *@This(), ch: u8) !void {
         try self.w.writeByte(ch);
-        if (builtin.mode == .Debug) {
-            self.last_written = ch;
-        }
+        self.last_written = ch;
     }
+
     inline fn writeAll(self: *@This(), str: []const u8) !void {
-        try self.w.writeAll(str);
-        if (builtin.mode == .Debug) {
-            if (str.len > 0) self.last_written = str[str.len - 1];
+        if (str.len > 0) {
+            try self.w.writeAll(str);
+            self.last_written = str[str.len - 1];
         }
     }
 
     inline fn writeIndent(self: *@This()) !void {
-        if (builtin.mode == .Debug) {
-            if (self.last_written != '\n' and self.last_written != 0) {
-                try self.w.writeByte('\n');
-                for (0..@intCast(self.depth)) |_|
-                    try self.w.writeAll("  ");
-                self.last_written = ' ';
-            } else if (self.last_written == '\n') {
-                for (0..@intCast(self.depth)) |_|
-                    try self.w.writeAll("  ");
-                self.last_written = ' ';
+        if (self.depth > 32 or !self.formatted) return;
+
+        const last_newline = self.last_written == '\n';
+        if (!last_newline and self.written) {
+            try self.w.writeByte('\n');
+        }
+        if (last_newline or self.written) {
+            switch (self.depth) {
+                0 => try self.w.writeAll("  " ** 0),
+                1 => try self.w.writeAll("  " ** 1),
+                2 => try self.w.writeAll("  " ** 2),
+                3 => try self.w.writeAll("  " ** 3),
+                4 => try self.w.writeAll("  " ** 4),
+                5 => try self.w.writeAll("  " ** 5),
+                6 => try self.w.writeAll("  " ** 6),
+                7 => try self.w.writeAll("  " ** 7),
+                8 => try self.w.writeAll("  " ** 8),
+                9 => try self.w.writeAll("  " ** 9),
+                10 => try self.w.writeAll("  " ** 10),
+                11 => try self.w.writeAll("  " ** 11),
+                12 => try self.w.writeAll("  " ** 12),
+                13 => try self.w.writeAll("  " ** 13),
+                14 => try self.w.writeAll("  " ** 14),
+                15 => try self.w.writeAll("  " ** 15),
+                16 => try self.w.writeAll("  " ** 16),
+                17 => try self.w.writeAll("  " ** 17),
+                18 => try self.w.writeAll("  " ** 18),
+                19 => try self.w.writeAll("  " ** 19),
+                20 => try self.w.writeAll("  " ** 20),
+                21 => try self.w.writeAll("  " ** 21),
+                22 => try self.w.writeAll("  " ** 22),
+                23 => try self.w.writeAll("  " ** 23),
+                24 => try self.w.writeAll("  " ** 24),
+                25 => try self.w.writeAll("  " ** 25),
+                26 => try self.w.writeAll("  " ** 26),
+                27 => try self.w.writeAll("  " ** 27),
+                28 => try self.w.writeAll("  " ** 28),
+                29 => try self.w.writeAll("  " ** 29),
+                30 => try self.w.writeAll("  " ** 30),
+                31 => try self.w.writeAll("  " ** 31),
+                32 => try self.w.writeAll("  " ** 32),
+
+                // Stop further indenting beyond a depth of 32
+                // since a document with this much nesting won't
+                // be human readable anyways, at least not with
+                // a normal-sized screen.
+                else => {},
             }
         }
     }
 
     inline fn writeEscapedContent(self: *@This(), str: []const u8) WriterError!void {
+        if (str.len == 0) return;
+
         const w = self.w;
         for (str) |ch| {
             switch (ch) {
@@ -63,9 +102,7 @@ const Internal = struct {
                 else => try w.writeByte(ch),
             }
         }
-        if (builtin.mode == .Debug) {
-            if (str.len > 0) self.last_written = str[str.len - 1];
-        }
+        self.last_written = str[str.len - 1];
     }
 };
 
@@ -264,6 +301,17 @@ pub fn written(self: @This()) bool {
     return self._internal.written;
 }
 
+// Return true if document should be formatted,
+// which means nodes will be indented based on depth
+// and add corresponding newlines.
+pub fn formatted(self: @This()) bool {
+    return self._internal.formatted;
+}
+
+pub fn setFormatted(self: @This(), value: bool) void {
+    self._internal.formatted = value;
+}
+
 pub const Elem = struct {
     tag: []const u8,
     _internal: *Internal,
@@ -283,11 +331,13 @@ pub const Elem = struct {
         errdefer z.writeAll(">") catch {};
 
         try z.writeIndent();
-        try z.writeAll("<");
+        try z.writeByte('<');
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
         self._internal.resetArena();
-        try z.writeAll(">\n");
+        try z.writeByte('>');
+        if (z.formatted) try z.writeByte('\n');
+
         z.depth += 1;
         self._internal.written = true;
     }
@@ -300,11 +350,13 @@ pub const Elem = struct {
         const z = self._internal;
         z.depth -= 1;
 
-        errdefer z.writeAll(">") catch {};
+        errdefer z.writeByte('>') catch {};
+
         try z.writeIndent();
         try z.writeAll("</");
         try z.writeAll(self.tag);
-        try z.writeAll(">\n");
+        try z.writeByte('>');
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 
@@ -316,15 +368,16 @@ pub const Elem = struct {
         errdefer z.writeAll(">") catch {};
 
         try z.writeIndent();
-        try z.writeAll("<");
+        try z.writeByte('<');
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
         self._internal.resetArena();
-        try z.writeAll(">");
+        try z.writeByte('>');
         try z.writeEscapedContent(str);
         try z.writeAll("</");
         try z.writeAll(self.tag);
-        try z.writeAll(">\n");
+        try z.writeByte('>');
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 
@@ -389,18 +442,19 @@ pub const TextArea = struct {
         str: []const u8,
     ) (Error || WriterError)!void {
         const z = self._internal;
-        errdefer z.writeAll(">") catch {};
+        errdefer z.writeByte('>') catch {};
 
         try z.writeIndent();
-        try z.writeAll("<");
+        try z.writeByte('<');
         try z.writeAll(tag);
         try z.pending_attrs.writeAndClear(tag, z.w);
         self._internal.resetArena();
-        try z.writeAll(">");
+        try z.writeByte('>');
         try z.writeAll(str);
         try z.writeAll("</");
         try z.writeAll(tag);
-        try z.writeAll(">\n");
+        try z.writeByte('>');
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 
@@ -456,9 +510,11 @@ pub const CommentElem = struct {
         }
 
         const z = self._internal;
-        errdefer z.writeAll(">") catch {};
+        errdefer z.writeByte('>') catch {};
+
         try z.writeIndent();
-        try z.writeAll("<!--\n");
+        try z.writeAll("<!--");
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 
@@ -469,18 +525,21 @@ pub const CommentElem = struct {
 
         const z = self._internal;
         try z.writeIndent();
-        try z.writeAll("-->\n");
+        try z.writeAll("-->");
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 
     pub fn render(self: @This(), str: []const u8) (Error || WriterError)!void {
         const z = self._internal;
         z.pending_attrs.clear();
-        errdefer z.writeAll(">") catch {};
+        errdefer z.writeByte('>') catch {};
+
         try z.writeIndent();
         try z.writeAll("<!--");
         try z.writeEscapedContent(str);
-        try z.writeAll("-->\n");
+        try z.writeAll("-->");
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 
@@ -510,13 +569,15 @@ pub const VoidElem = struct {
 
     pub fn render(self: @This()) (Error || WriterError)!void {
         const z = self._internal;
-        errdefer z.writeAll(">") catch {};
+        errdefer z.writeByte('>') catch {};
+
         try z.writeIndent();
-        try z.writeAll("<");
+        try z.writeByte('<');
         try z.writeAll(self.tag);
         try z.pending_attrs.writeAndClear(self.tag, z.w);
         self._internal.resetArena();
-        try z.writeAll(">\n");
+        try z.writeByte('>');
+        if (z.formatted) try z.writeByte('\n');
         self._internal.written = true;
     }
 

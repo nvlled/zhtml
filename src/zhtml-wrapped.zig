@@ -255,6 +255,13 @@ pub fn attr(self: @This(), key: anytype, value: []const u8) void {
     };
 }
 
+pub fn attrf(self: @This(), key: anytype, value: []const u8) void {
+    self.getError() catch return;
+    self.unwrap.attrf(key, value) catch |err| {
+        self.setLastError(err);
+    };
+}
+
 pub fn attrs(self: @This(), args: anytype) void {
     self.getError() catch return;
     self.unwrap.attrs(args) catch |err| {

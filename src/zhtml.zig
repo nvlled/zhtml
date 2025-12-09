@@ -312,6 +312,10 @@ pub fn setFormatted(self: @This(), value: bool) void {
     self._internal.formatted = value;
 }
 
+pub fn writer(self: @This()) *std.Io.Writer {
+    return self._internal.w;
+}
+
 pub const Elem = struct {
     tag: []const u8,
     _internal: *Internal,

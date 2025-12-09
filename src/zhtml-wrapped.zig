@@ -320,6 +320,10 @@ pub fn setFormatted(self: @This(), value: bool) void {
     self.unwrap._internal.formatted = value;
 }
 
+pub fn writer(self: @This()) *std.Io.Writer {
+    return self.unwrap._internal.w;
+}
+
 pub const Elem = struct {
     unwrap: Zhtml.Elem,
     _internal: *Internal,

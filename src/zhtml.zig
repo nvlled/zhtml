@@ -189,6 +189,9 @@ source: VoidElem,
 
 comment: CommentElem,
 
+header: Elem,
+footer: Elem,
+
 pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
     var self: Zhtml = undefined;
 
@@ -314,6 +317,20 @@ pub fn setFormatted(self: @This(), value: bool) void {
 
 pub fn writer(self: @This()) *std.Io.Writer {
     return self._internal.w;
+}
+
+pub fn elem(self: @This(), tag: []const u8) Elem {
+    return .{
+        .tag = tag,
+        ._internal = self._internal,
+    };
+}
+
+pub fn @"void"(self: @This(), tag: []const u8) VoidElem {
+    return .{
+        .tag = tag,
+        ._internal = self._internal,
+    };
 }
 
 pub const Elem = struct {
@@ -1029,6 +1046,31 @@ test "written closing tag" {
     try std.testing.expect(!z.written());
     try z.write("something");
     try std.testing.expect(z.written());
+}
+
+test "elem and voidElem" {
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: Zhtml = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    try std.testing.expect(!z.written());
+
+    try z.elem("footer").attr(.class, "feet");
+    try z.elem("footer").render("");
+
+    try z.void("xyz").render();
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<footer class="feet"></footer>
+        \\<xyz>
+        \\
+    , output);
 }
 
 test {

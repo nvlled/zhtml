@@ -169,6 +169,9 @@ source: VoidElem,
 
 comment: CommentElem,
 
+header: Elem,
+footer: Elem,
+
 pub fn init(w: *std.Io.Writer, allocator: Allocator) !@This() {
     const zhtml = try allocator.create(Zhtml);
     zhtml.* = try .init(w, allocator);
@@ -329,6 +332,20 @@ pub fn setFormatted(self: @This(), value: bool) void {
 
 pub fn writer(self: @This()) *std.Io.Writer {
     return self.unwrap._internal.w;
+}
+
+pub fn elem(self: @This(), tag: []const u8) Elem {
+    return .{
+        .unwrap = Zhtml.Elem.init(tag, self.unwrap),
+        ._internal = self._internal,
+    };
+}
+
+pub fn @"void"(self: @This(), tag: []const u8) VoidElem {
+    return .{
+        .unwrap = Zhtml.VoidElem.init(tag, self.unwrap),
+        ._internal = self._internal,
+    };
 }
 
 pub const Elem = struct {
@@ -588,9 +605,9 @@ pub const VoidElem = struct {
 //   }
 fn invokeUnwrap(self: anytype, func: anytype, args: anytype) !void {
     const internal = @field(self, "_internal");
-    const elem = @field(self, "unwrap");
+    const element = @field(self, "unwrap");
     Meta.callMethod(internal.*, "getError", .{}) catch return;
-    @call(.auto, func, .{elem} ++ args) catch |err| {
+    @call(.auto, func, .{element} ++ args) catch |err| {
         Meta.callMethod(internal, "setError", .{err});
         return err;
     };
@@ -725,6 +742,31 @@ test "comprehensive" {
     defer allocator.free(output);
 
     try std.testing.expectEqualStrings(expected, output);
+}
+
+test "elem and voidElem" {
+    const allocator = std.testing.allocator;
+    var buf: std.Io.Writer.Allocating = .init(allocator);
+    defer buf.deinit();
+
+    const z: @This() = try .init(&buf.writer, allocator);
+    defer z.deinit(allocator);
+
+    try std.testing.expect(!z.written());
+
+    z.elem("footer").attr(.class, "feet");
+    z.elem("footer").render("");
+
+    z.void("xyz").render();
+
+    const output = try buf.toOwnedSlice();
+    defer allocator.free(output);
+
+    try std.testing.expectEqualStrings(
+        \\<footer class="feet"></footer>
+        \\<xyz>
+        \\
+    , output);
 }
 
 test {
